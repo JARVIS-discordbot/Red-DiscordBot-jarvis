@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: red-discordbot\n"
-"POT-Creation-Date: 2025-01-27 00:33+0000\n"
+"POT-Creation-Date: 2025-02-06 00:43+0000\n"
 "Last-Translator: \n"
 "Language-Team: German\n"
 "MIME-Version: 1.0\n"
@@ -773,11 +773,11 @@ msgstr "Dieser Befehl kann ohne eine globale Bank nicht in den Direktnachrichten
 msgid "You need at least {cost} {currency} to use this command."
 msgstr "Sie benötigen mindestens {cost} {currency} um diesen Befehl zu verwenden."
 
-#: redbot/core/bot.py:2463
+#: redbot/core/bot.py:2482
 msgid "There is still one message remaining. Type {command_1} to continue or {command_2} to upload all contents as a file."
 msgstr "Es bleibt noch eine Nachricht übrig. Geben Sie {command_1} ein, um fortzufahren oder {command_2}, um alle Inhalte als Datei hochzuladen."
 
-#: redbot/core/bot.py:2468
+#: redbot/core/bot.py:2487
 msgid "There are still {count} messages remaining. Type {command_1} to continue or {command_2} to upload all contents as a file."
 msgstr "Es bleiben noch {count} Nachrichten. Geben Sie {command_1} ein, um fortzufahren oder {command_2}, um alle Inhalte als Datei hochzuladen."
 

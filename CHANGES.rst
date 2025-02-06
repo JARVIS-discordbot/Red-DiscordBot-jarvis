@@ -1,5 +1,21 @@
 .. Red changelogs
 
+Redbot 3.5.16 (2025-02-06)
+==========================
+
+| Thanks to all these amazing people that contributed to this release:
+| :ghuser:`Flame442`, :ghuser:`Jackenmen`
+
+This is a hotfix release changing our implementation to prevent crash at startup
+when invalid value of global locale/regional format configuration is encountered.
+We have seen a few reports of this occurring and we believe that this was caused by
+some 3rd-party cog(s) passing invalid values to Red <3.5 i18n APIs as those versions
+did not validate the input in some scenarios. During startup, Red will now simply
+log a warning, if it encounters incorrect global locale/regional format configuration
+and reset it to a known valid value.
+
+----
+
 Redbot 3.5.15 (2025-02-03)
 ==========================
 
