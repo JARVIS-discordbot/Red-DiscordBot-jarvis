@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: red-discordbot\n"
-"POT-Creation-Date: 2025-01-27 00:33+0000\n"
+"POT-Creation-Date: 2025-02-06 00:43+0000\n"
 "Last-Translator: \n"
 "Language-Team: Slovenian\n"
 "MIME-Version: 1.0\n"
@@ -737,11 +737,11 @@ msgstr "Plačevanje v zasebnih sporočilih ni mogoče brez globalne banke."
 msgid "You need at least {cost} {currency} to use this command."
 msgstr "Potrebno je vsaj {cost}{currency} da uporabiš to komando."
 
-#: redbot/core/bot.py:2463
+#: redbot/core/bot.py:2482
 msgid "There is still one message remaining. Type {command_1} to continue or {command_2} to upload all contents as a file."
 msgstr ""
 
-#: redbot/core/bot.py:2468
+#: redbot/core/bot.py:2487
 msgid "There are still {count} messages remaining. Type {command_1} to continue or {command_2} to upload all contents as a file."
 msgstr ""
 
