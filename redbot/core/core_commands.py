@@ -446,7 +446,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
                 author_repo,
                 contributors_url,
                 support_server_url,
-                "[donate](https://paypal.me/JARVISDISCORDBOT)",
+                "[donate](https://buymeacoffee.com/bencos18)",
                 "  [bot support](https://discord.gg/WW4eNQj9qr)",
             )
 
