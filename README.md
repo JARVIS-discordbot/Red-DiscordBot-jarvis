@@ -27,7 +27,7 @@
 </p>
 <p align="center">
   <a href="https://github.com/Cog-Creators/Red-DiscordBot/actions">
-    <img src="https://img.shields.io/github/workflow/status/Cog-Creators/Red-Discordbot/Tests?label=tests" alt="GitHub Actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/Cog-Creators/Red-Discordbot/tests.yml?label=tests" alt="GitHub Actions">
   </a>
   <a href="http://docs.discord.red/en/stable/?badge=stable">
     <img src="https://readthedocs.org/projects/red-discordbot/badge/?version=stable" alt="Red on readthedocs.org">
@@ -57,6 +57,11 @@
   <a href="#license">License</a>
 </p>
 
+
+# This is for my bot J.A.R.V.I.S 
+
+# for the official bot code go to https://github.com/Cog-Creators/Red-DiscordBot
+ 
 # Overview
 
 Red is a fully modular bot – meaning all features and commands can be enabled/disabled to your

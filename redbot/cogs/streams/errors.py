@@ -31,6 +31,10 @@ class InvalidTrovoCredentials(StreamsError):
     pass
 
 
+class InvalidKickCredentials(StreamsError):
+    pass
+
+
 class YoutubeQuotaExceeded(StreamsError):
     pass
 

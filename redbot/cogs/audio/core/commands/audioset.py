@@ -464,7 +464,7 @@ class AudioSetCommands(MixinMeta, metaclass=CompositeMetaClass):
         """Set a playlist to auto-play songs from.
 
         **Usage**:
-        ​ ​ ​ ​ `[p]audioset autoplay playlist_name_OR_id [args]`
+        ​ ​ ​ ​ `[p]audioset autoplay playlist playlist_name_OR_id [args]`
 
         **Args**:
         ​ ​ ​ ​ The following are all optional:
@@ -487,9 +487,9 @@ class AudioSetCommands(MixinMeta, metaclass=CompositeMetaClass):
         ​ ​ ​ ​ Exact guild name
 
         Example use:
-        ​ ​ ​ ​ `[p]audioset autoplay MyGuildPlaylist`
-        ​ ​ ​ ​ `[p]audioset autoplay MyGlobalPlaylist --scope Global`
-        ​ ​ ​ ​ `[p]audioset autoplay PersonalPlaylist --scope User --author Draper`
+        ​ ​ ​ ​ `[p]audioset autoplay playlist MyGuildPlaylist`
+        ​ ​ ​ ​ `[p]audioset autoplay playlist MyGlobalPlaylist --scope Global`
+        ​ ​ ​ ​ `[p]audioset autoplay playlist PersonalPlaylist --scope User --author Draper`
         """
         if self.playlist_api is None:
             return await self.send_embed_msg(
@@ -758,9 +758,17 @@ class AudioSetCommands(MixinMeta, metaclass=CompositeMetaClass):
         """Set a price for queueing tracks for non-mods, 0 to disable."""
         if price < 0:
             return await self.send_embed_msg(
-                ctx, title=_("Invalid Price"), description=_("Price can't be less than zero.")
+                ctx,
+                title=_("Invalid Price"),
+                description=_("Price can't be less than zero."),
             )
-        if price == 0:
+        elif price > 2 ** 63 - 1:
+            return await self.send_embed_msg(
+                ctx,
+                title=_("Invalid Price"),
+                description=_("Price can't be greater than 2^63 - 1."),
+            )
+        elif price == 0:
             jukebox = False
             await self.send_embed_msg(
                 ctx, title=_("Setting Changed"), description=_("Jukebox mode disabled.")
@@ -1118,10 +1126,10 @@ class AudioSetCommands(MixinMeta, metaclass=CompositeMetaClass):
         if (
             is_owner
             and not global_data["use_external_lavalink"]
-            and self.managed_node_controller.ll_build
+            and self.managed_node_controller.ll_version
         ):
             msg += _(
-                "Lavalink build:         [{llbuild}]\n"
+                "Lavalink version:       [{llversion}]\n"
                 "Lavalink branch:        [{llbranch}]\n"
                 "Release date:           [{build_time}]\n"
                 "Lavaplayer version:     [{lavaplayer}]\n"
@@ -1131,7 +1139,7 @@ class AudioSetCommands(MixinMeta, metaclass=CompositeMetaClass):
                 "Max Heapsize:           [{xmx}]\n"
             ).format(
                 build_time=self.managed_node_controller.build_time,
-                llbuild=self.managed_node_controller.ll_build,
+                llversion=self.managed_node_controller.ll_version,
                 llbranch=self.managed_node_controller.ll_branch,
                 lavaplayer=self.managed_node_controller.lavaplayer,
                 jvm=self.managed_node_controller.jvm,
@@ -1142,11 +1150,24 @@ class AudioSetCommands(MixinMeta, metaclass=CompositeMetaClass):
         if is_owner:
             msg += _("Localtracks path:       [{localpath}]\n").format(**global_data)
 
+        if (
+            is_owner
+            and not global_data["use_external_lavalink"]
+            and self.managed_node_controller.plugins
+        ):
+            plugins = self.managed_node_controller.plugins
+            msg += f"\n---{_('Lavalink Plugin Versions')}---"
+            plugin_name_max_len = 0
+            for plugin_name, __ in plugins.items():
+                plugin_name_max_len = max(plugin_name_max_len, len(plugin_name))
+            for plugin_name, plugin_version in plugins.items():
+                key = f"{plugin_name}:".ljust(plugin_name_max_len + 5)
+                msg += f"\n{key} [{plugin_version}]"
+
         await self.send_embed_msg(ctx, description=box(msg, lang="ini"))
 
     @command_audioset.command(name="logs")
     @commands.is_owner()
-    @commands.guild_only()
     @has_managed_server()
     async def command_audioset_logs(self, ctx: commands.Context):
         """Sends the managed Lavalink node logs to your DMs."""
