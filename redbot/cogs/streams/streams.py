@@ -6,6 +6,7 @@ from redbot.core import commands, Config
 from redbot.core.i18n import cog_i18n, Translator, set_contextual_locales_from_guild
 from redbot.core.utils._internal_utils import send_to_owners_with_prefix_replaced
 from redbot.core.utils.chat_formatting import escape, inline, pagify
+from redbot.core import checks
 
 from .streamtypes import (
     KickStream,
@@ -650,6 +651,7 @@ class Streams(commands.Cog):
         await self.add_or_remove(ctx, stream, discord_channel)
 
     @commands.group()
+    @commands.guild_only()
     @commands.mod_or_permissions(manage_channels=True)
     async def streamset(self, ctx: commands.Context):
         """Manage stream alert settings."""
