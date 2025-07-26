@@ -2465,7 +2465,9 @@ class Red(
             ret.append(msg)
             n_remaining = len(messages) - idx
             files_perm = (
-                not channel.guild or channel.permissions_for(channel.guild.me).attach_files
+                not channel.guild 
+                or not hasattr(channel, 'permissions_for')
+                or channel.permissions_for(channel.guild.me).attach_files
             )
             options = ("more", "file") if files_perm else ("more",)
             if n_remaining > 0:
