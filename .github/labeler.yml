@@ -217,6 +217,7 @@
 "Category: Core - i18n":
   # Source
   - redbot/core/i18n.py
+  - redbot/core/_i18n.py  
   # Locale files
   - redbot/**/locales/*
   # Docs
