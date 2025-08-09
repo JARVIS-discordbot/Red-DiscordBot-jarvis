@@ -334,6 +334,7 @@ class Streams(commands.Cog):
         """Check if a Trovo channel is live."""
         token = await self.bot.get_shared_api_tokens("trovo")
         stream = TrovoStream(name=channel_name, token=token)
+
     @commands.guild_only()
     @commands.command()
     async def kickstream(self, ctx: commands.Context, channel_name: str):

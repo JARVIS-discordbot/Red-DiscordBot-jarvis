@@ -576,6 +576,8 @@ class TrovoStream(Stream):
         if category := data["category_name"]:
             embed.set_footer(text=_("Playing: ") + category)
         return embed
+
+
 class KickStream(Stream):
     token_name = "kick"
     platform_name = "Kick"
