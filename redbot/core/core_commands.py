@@ -6017,9 +6017,10 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         repo_cog = self.bot.get_cog("Downloader")
         if not repo_cog:
             return await ctx.send("My owner needs to load another plugin before I can continue.")
+        
+        # Create base embed
         embed = discord.Embed(
             title=f"{self.bot.user.name}'s Code Credits",
-            # description=f"",
             timestamp=self.bot.user.created_at,
         )
         embed.set_footer(text=f"{self.bot.user.name}'s birthday is")
@@ -6031,11 +6032,8 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
             "(https://github.com/Cog-Creators/Red-DiscordBot/graphs/contributors).",
             inline=False,
         )
-        # embed.add_field(
-        # name="\N{ZERO WIDTH SPACE}",
-        # value="jarvis info",  thanks Aki and Fixator
-        # inline=False,
-        # )
+        
+        # Get third-party modules
         used_repos = {c.repo_name for c in await repo_cog.installed_cogs()}
         cogs_credits = [
             f"[{repo.url.split('/')[4]}]({repo.url}): {', '.join(repo.author) or repo.url.split('/')[-2]}"
@@ -6045,14 +6043,45 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
 
         cogs_credits = list(set(cogs_credits))
         cogs_credits = sorted(cogs_credits, key=lambda x: x[1].lower())
-        cogs_credits = "\n".join(cogs_credits)
-        cogs_credits = list(pagify(cogs_credits, page_length=1024))
-        embed.add_field(
-            name="Third-party modules and their creators",
-            value=cogs_credits[0],
-            inline=False,
-        )
-        cogs_credits.pop(0)
-        for page in cogs_credits:
-            embed.add_field(name="\N{ZERO WIDTH SPACE}", value=page, inline=False)
-        await ctx.send(embed=embed)
+        cogs_credits_text = "\n".join(cogs_credits)
+        
+        # Check if we can fit everything in one embed
+        if len(cogs_credits_text) <= 4000:  # Leave room for embed overhead
+            embed.add_field(
+                name="Third-party modules and their creators",
+                value=cogs_credits_text,
+                inline=False,
+            )
+            await ctx.send(embed=embed)
+        else:
+            # Use pagination for large lists
+            pages = list(pagify(cogs_credits_text, page_length=4000))
+            embeds = []
+            
+            for i, page in enumerate(pages):
+                page_embed = discord.Embed(
+                    title=f"{self.bot.user.name}'s Code Credits (Page {i+1}/{len(pages)})",
+                    timestamp=self.bot.user.created_at,
+                )
+                page_embed.set_footer(text=f"{self.bot.user.name}'s birthday is")
+                page_embed.set_thumbnail(url=ctx.me.avatar.url)
+                
+                if i == 0:
+                    # First page includes the main description
+                    page_embed.add_field(
+                        name="\N{ZERO WIDTH SPACE}",
+                        value=f"{self.bot.user.name} is an instance of [Red Bot](https://github.com/Cog-Creators/Red-DiscordBot), "
+                        "created by [Twentysix](https://github.com/Twentysix26) and improved by [many]"
+                        "(https://github.com/Cog-Creators/Red-DiscordBot/graphs/contributors).",
+                        inline=False,
+                    )
+                
+                page_embed.add_field(
+                    name="Third-party modules and their creators",
+                    value=page,
+                    inline=False,
+                )
+                embeds.append(page_embed)
+            
+            # Use menu system for pagination
+            await menu(ctx, embeds, timeout=180)
