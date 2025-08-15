@@ -6046,7 +6046,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         cogs_credits_text = "\n".join(cogs_credits)
         
         # Check if we can fit everything in one embed
-        if len(cogs_credits_text) <= 4000:  # Leave room for embed overhead
+        if len(cogs_credits_text) <= 1000:  # Leave room for embed overhead and stay under 1024 field limit
             embed.add_field(
                 name="Third-party modules and their creators",
                 value=cogs_credits_text,
@@ -6054,8 +6054,8 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
             )
             await ctx.send(embed=embed)
         else:
-            # Use pagination for large lists
-            pages = list(pagify(cogs_credits_text, page_length=4000))
+            # Use pagination for large lists - Discord field value limit is 1024
+            pages = list(pagify(cogs_credits_text, page_length=1000))
             embeds = []
             
             for i, page in enumerate(pages):
