@@ -6017,7 +6017,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         repo_cog = self.bot.get_cog("Downloader")
         if not repo_cog:
             return await ctx.send("My owner needs to load another plugin before I can continue.")
-        
+
         # Create base embed
         embed = discord.Embed(
             title=f"{self.bot.user.name}'s Code Credits",
@@ -6032,7 +6032,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
             "(https://github.com/Cog-Creators/Red-DiscordBot/graphs/contributors).",
             inline=False,
         )
-        
+
         # Get third-party modules
         used_repos = {c.repo_name for c in await repo_cog.installed_cogs()}
         cogs_credits = [
@@ -6044,9 +6044,11 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         cogs_credits = list(set(cogs_credits))
         cogs_credits = sorted(cogs_credits, key=lambda x: x[1].lower())
         cogs_credits_text = "\n".join(cogs_credits)
-        
+
         # Check if we can fit everything in one embed
-        if len(cogs_credits_text) <= 1000:  # Leave room for embed overhead and stay under 1024 field limit
+        if (
+            len(cogs_credits_text) <= 1000
+        ):  # Leave room for embed overhead and stay under 1024 field limit
             embed.add_field(
                 name="Third-party modules and their creators",
                 value=cogs_credits_text,
@@ -6057,7 +6059,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
             # Use pagination for large lists - Discord field value limit is 1024
             pages = list(pagify(cogs_credits_text, page_length=1000))
             embeds = []
-            
+
             for i, page in enumerate(pages):
                 page_embed = discord.Embed(
                     title=f"{self.bot.user.name}'s Code Credits (Page {i+1}/{len(pages)})",
@@ -6065,7 +6067,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
                 )
                 page_embed.set_footer(text=f"{self.bot.user.name}'s birthday is")
                 page_embed.set_thumbnail(url=ctx.me.avatar.url)
-                
+
                 if i == 0:
                     # First page includes the main description
                     page_embed.add_field(
@@ -6075,13 +6077,13 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
                         "(https://github.com/Cog-Creators/Red-DiscordBot/graphs/contributors).",
                         inline=False,
                     )
-                
+
                 page_embed.add_field(
                     name="Third-party modules and their creators",
                     value=page,
                     inline=False,
                 )
                 embeds.append(page_embed)
-            
+
             # Use menu system for pagination
             await menu(ctx, embeds, timeout=180)
