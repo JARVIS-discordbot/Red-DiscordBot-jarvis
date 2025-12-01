@@ -854,7 +854,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         if results.unhandled:
             message_parts.append(
                 _(
-                    "\nℹ️ Note: The following cogs did not provide data: {scogs}. "
+                    "\nℹ️ Note: The following cogs did not provide data: {cogs}. "
                     "This may be normal if they don't store user data."
                 ).format(cogs=humanize_list(results.unhandled))
             )
