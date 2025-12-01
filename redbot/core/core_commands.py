@@ -861,6 +861,70 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         
         await ctx.send("\n".join(message_parts), file=file)
 
+    @commands.cooldown(1, 300, commands.BucketType.user)
+    @mydata.command(cls=commands.commands._AlwaysAvailableCommand, name="whichcogs")
+    async def mydata_whichcogs(self, ctx: commands.Context):
+        """Check which cogs implement data retrieval.
+        
+        This shows which cogs have implemented the `red_get_data_for_user` method
+        and will provide data when you use `[p]mydata getmydata`.
+        
+        **Example:**
+        - `[p]mydata whichcogs`
+        """
+        await ctx.send(_("Checking which cogs implement data retrieval..."))
+        
+        implemented = []
+        not_implemented = []
+        
+        # Use a dummy user ID to test
+        test_user_id = 123456789
+        
+        for cog_name, cog in self.bot.cogs.items():
+            if hasattr(cog, "red_get_data_for_user"):
+                try:
+                    # Try to call the method - if it raises RedUnhandledAPI, it's not implemented
+                    result = await cog.red_get_data_for_user(user_id=test_user_id)
+                    # If it doesn't raise, it's implemented (even if it returns empty)
+                    implemented.append(cog_name)
+                except commands.commands.RedUnhandledAPI:
+                    # Base implementation raises this
+                    not_implemented.append(cog_name)
+                except Exception:
+                    # Other exceptions might mean it's implemented but errored
+                    # We'll count it as implemented since it tried to do something
+                    implemented.append(cog_name)
+            else:
+                not_implemented.append(cog_name)
+        
+        message_parts = [
+            _("**Cogs that provide data:**"),
+        ]
+        
+        if implemented:
+            message_parts.append(humanize_list(implemented))
+        else:
+            message_parts.append(_("None"))
+        
+        message_parts.append("")
+        message_parts.append(_("**Cogs that don't provide data:**"))
+        
+        if not_implemented:
+            # Show first 15 to avoid message length issues
+            shown = not_implemented[:15]
+            message_parts.append(humanize_list(shown))
+            if len(not_implemented) > 15:
+                message_parts.append(_("\n... and {count} more.").format(count=len(not_implemented) - 15))
+        else:
+            message_parts.append(_("None"))
+        
+        message_parts.append("")
+        message_parts.append(_("Note: Cogs that don't implement this method may still store data,"))
+        message_parts.append(_("but it won't be included in `{prefix}mydata getmydata` until they add support.").format(prefix=ctx.clean_prefix))
+        
+        for page in pagify("\n".join(message_parts)):
+            await ctx.send(page)
+
     @commands.is_owner()
     @mydata.group(name="ownermanagement")
     async def mydata_owner_management(self, ctx: commands.Context):
