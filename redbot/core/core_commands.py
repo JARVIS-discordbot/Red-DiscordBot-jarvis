@@ -16,6 +16,7 @@ import psutil
 import getpass
 import pip
 import traceback
+import zipfile
 from pathlib import Path
 from collections import defaultdict
 from redbot.core import app_commands, data_manager
@@ -790,13 +791,75 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
     @commands.cooldown(1, 7200, commands.BucketType.user)
     @mydata.command(cls=commands.commands._AlwaysAvailableCommand, name="getmydata")
     async def mydata_getdata(self, ctx: commands.Context):
-        """[Coming Soon] Get what data [botname] has about you."""
-        await ctx.send(
-            _(
-                "This command doesn't do anything yet, "
-                "but we're working on adding support for this."
+        """Get what data [botname] has about you.
+        
+        This will send you a zip file containing all the data the bot has stored about you.
+        
+        **Example:**
+        - `[p]mydata getmydata`
+        """
+        await ctx.send(_("Collecting your data. This may take a moment..."))
+        
+        try:
+            results = await self.bot.handle_data_request(user_id=ctx.author.id)
+        except Exception as exc:
+            log.exception("Error collecting user data")
+            await ctx.send(
+                _(
+                    "An error occurred while collecting your data. "
+                    "Please contact the bot owner if this persists."
+                )
             )
-        )
+            return
+        
+        if not results.data:
+            await ctx.send(
+                _(
+                    "I don't have any stored data about you {mention}."
+                ).format(mention=ctx.author.mention)
+            )
+            return
+        
+        # Create a zip file with all the data
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for cog_name, cog_data in results.data.items():
+                # Create a folder for each cog/extension
+                safe_cog_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in cog_name)
+                for filename, file_data in cog_data.items():
+                    # Reset file pointer to beginning
+                    file_data.seek(0)
+                    # Add file to zip with cog name as folder
+                    zip_file.writestr(f"{safe_cog_name}/{filename}", file_data.read())
+        
+        zip_buffer.seek(0)
+        
+        # Send the zip file
+        file = discord.File(zip_buffer, filename=f"my_data_{ctx.author.id}.zip")
+        
+        message_parts = [
+            _("Here is the data I have stored about you {mention}.").format(mention=ctx.author.mention)
+        ]
+        
+        if results.failed_cogs or results.failed_modules:
+            message_parts.append(
+                _(
+                    "\n⚠️ Note: Some modules or cogs encountered errors while collecting data: "
+                    "{items}. Please contact the bot owner if you need this data."
+                ).format(
+                    items=humanize_list(results.failed_cogs + results.failed_modules)
+                )
+            )
+        
+        if results.unhandled:
+            message_parts.append(
+                _(
+                    "\nℹ️ Note: The following cogs did not provide data: {scogs}. "
+                    "This may be normal if they don't store user data."
+                ).format(cogs=humanize_list(results.unhandled))
+            )
+        
+        await ctx.send("\n".join(message_parts), file=file)
 
     @commands.is_owner()
     @mydata.group(name="ownermanagement")

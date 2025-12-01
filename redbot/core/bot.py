@@ -9,6 +9,8 @@ import sys
 import contextlib
 import weakref
 import functools
+import io
+import zipfile
 from collections import namedtuple, OrderedDict
 from datetime import datetime
 from importlib.machinery import ModuleSpec
@@ -76,6 +78,7 @@ __all__ = ("Red",)
 NotMessage = namedtuple("NotMessage", "guild")
 
 DataDeletionResults = namedtuple("DataDeletionResults", "failed_modules failed_cogs unhandled")
+DataRequestResults = namedtuple("DataRequestResults", "data failed_modules failed_cogs unhandled")
 
 PreInvokeCoroutine = Callable[[commands.Context], Awaitable[Any]]
 T_BIC = TypeVar("T_BIC", bound=PreInvokeCoroutine)
@@ -2325,6 +2328,41 @@ class Red(
 
         await self._whiteblacklist_cache.discord_deleted_user(user_id)
 
+    async def _core_data_request(self, *, user_id: int) -> MutableMapping[str, io.BytesIO]:
+        """
+        Get core bot data for a user.
+        
+        This includes user-specific configuration data.
+        """
+        user_data = {}
+        user_config = await self._config.user_from_id(user_id).all()
+        
+        if user_config:
+            config_str = f"User Configuration Data for User ID: {user_id}\n"
+            config_str += "=" * 50 + "\n\n"
+            for key, value in user_config.items():
+                config_str += f"{key}: {value}\n"
+            
+            config_bytes = io.BytesIO(config_str.encode('utf-8'))
+            user_data["user_config.txt"] = config_bytes
+        
+        # Check for guild-specific data
+        all_guilds = await self._config.all_guilds()
+        guild_data_list = []
+        
+        async for guild_id, guild_data in AsyncIter(all_guilds.items(), steps=100):
+            if user_id in guild_data.get("autoimmune_ids", []):
+                guild_data_list.append(f"Guild ID {guild_id}: Listed in autoimmune_ids")
+        
+        if guild_data_list:
+            guild_str = f"Guild-Specific Data for User ID: {user_id}\n"
+            guild_str += "=" * 50 + "\n\n"
+            guild_str += "\n".join(guild_data_list)
+            guild_bytes = io.BytesIO(guild_str.encode('utf-8'))
+            user_data["guild_data.txt"] = guild_bytes
+        
+        return user_data
+
     async def handle_data_deletion_request(
         self,
         *,
@@ -2416,6 +2454,88 @@ class Red(
         await asyncio.gather(*handlers)
 
         return DataDeletionResults(
+            failed_modules=failures["extension"],
+            failed_cogs=failures["cog"],
+            unhandled=failures["unhandled"],
+        )
+
+    async def handle_data_request(
+        self,
+        *,
+        user_id: int,
+    ) -> DataRequestResults:
+        """
+        This tells each cog and extension to provide data for a user.
+
+        Calling this should be limited to interfaces designed for it.
+
+        See ``redbot.core.commands.Cog.red_get_data_for_user``
+        for details about the parameters and intent.
+
+        Parameters
+        ----------
+        user_id
+            The user ID to get data for.
+
+        Returns
+        -------
+        DataRequestResults
+            A named tuple ``(data, failed_modules, failed_cogs, unhandled)``
+            containing a mapping of cog/extension names to their data,
+            lists with names of failed modules, failed cogs,
+            and cogs that didn't handle data request.
+        """
+        await self.wait_until_red_ready()
+        
+        extension_handlers = {
+            extension_name: handler
+            for extension_name, extension in self.extensions.items()
+            if (handler := getattr(extension, "red_get_data_for_user", None))
+        }
+
+        cog_handlers = {
+            cog_qualname: cog.red_get_data_for_user for cog_qualname, cog in self.cogs.items()
+            if hasattr(cog, "red_get_data_for_user")
+        }
+
+        failures = {
+            "extension": [],
+            "cog": [],
+            "unhandled": [],
+        }
+        data = {}
+
+        async def wrapper(func, stype, sname):
+            try:
+                result = await func(user_id=user_id)
+                if result:
+                    data[sname] = result
+            except commands.commands.RedUnhandledAPI:
+                log.warning(f"{stype}.{sname} did not handle data request")
+                failures["unhandled"].append(sname)
+            except Exception as exc:
+                log.exception(f"{stype}.{sname} errored when handling data request")
+                failures[stype].append(sname)
+
+        async def core_data_wrapper():
+            try:
+                core_data = await self._core_data_request(user_id=user_id)
+                if core_data:
+                    data["Red Core Bot Data"] = core_data
+            except Exception as exc:
+                log.exception("Red Core Bot Data errored when handling data request")
+                failures["extension"].append("Red Core Bot Data")
+        
+        handlers = [
+            *(wrapper(coro, "extension", name) for name, coro in extension_handlers.items()),
+            *(wrapper(coro, "cog", name) for name, coro in cog_handlers.items()),
+            core_data_wrapper(),
+        ]
+
+        await asyncio.gather(*handlers)
+
+        return DataRequestResults(
+            data=data,
             failed_modules=failures["extension"],
             failed_cogs=failures["cog"],
             unhandled=failures["unhandled"],
