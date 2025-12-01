@@ -2337,14 +2337,33 @@ class Red(
         user_data = {}
         user_config = await self._config.user_from_id(user_id).all()
         
+        config_parts = []
+        config_parts.append(f"User Configuration Data for User ID: {user_id}")
+        config_parts.append("=" * 50)
+        config_parts.append("")
+        
         if user_config:
-            config_str = f"User Configuration Data for User ID: {user_id}\n"
-            config_str += "=" * 50 + "\n\n"
-            for key, value in user_config.items():
-                config_str += f"{key}: {value}\n"
-            
-            config_bytes = io.BytesIO(config_str.encode('utf-8'))
-            user_data["user_config.txt"] = config_bytes
+            for key, value in sorted(user_config.items()):
+                if value is None:
+                    config_parts.append(f"{key}: None (not set)")
+                elif isinstance(value, (dict, list)):
+                    config_parts.append(f"{key}:")
+                    config_parts.append(f"  {value}")
+                else:
+                    config_parts.append(f"{key}: {value}")
+        else:
+            config_parts.append("No user-specific configuration data found.")
+        
+        config_parts.append("")
+        config_parts.append("=" * 50)
+        config_parts.append("")
+        config_parts.append("Note: This is only core bot configuration data.")
+        config_parts.append("Other cogs may store additional data if they implement")
+        config_parts.append("the red_get_data_for_user method.")
+        
+        config_str = "\n".join(config_parts)
+        config_bytes = io.BytesIO(config_str.encode('utf-8'))
+        user_data["user_config.txt"] = config_bytes
         
         # Check for guild-specific data
         all_guilds = await self._config.all_guilds()
@@ -2352,7 +2371,12 @@ class Red(
         
         async for guild_id, guild_data in AsyncIter(all_guilds.items(), steps=100):
             if user_id in guild_data.get("autoimmune_ids", []):
-                guild_data_list.append(f"Guild ID {guild_id}: Listed in autoimmune_ids")
+                try:
+                    guild = self.get_guild(guild_id)
+                    guild_name = guild.name if guild else f"Unknown Guild (ID: {guild_id})"
+                    guild_data_list.append(f"Guild: {guild_name} (ID: {guild_id}) - Listed in autoimmune_ids")
+                except Exception:
+                    guild_data_list.append(f"Guild ID {guild_id}: Listed in autoimmune_ids")
         
         if guild_data_list:
             guild_str = f"Guild-Specific Data for User ID: {user_id}\n"
@@ -2493,10 +2517,24 @@ class Red(
             if (handler := getattr(extension, "red_get_data_for_user", None))
         }
 
-        cog_handlers = {
-            cog_qualname: cog.red_get_data_for_user for cog_qualname, cog in self.cogs.items()
-            if hasattr(cog, "red_get_data_for_user")
-        }
+        # Only include cogs that actually override the method, not just inherit it
+        cog_handlers = {}
+        
+        for cog_qualname, cog in self.cogs.items():
+            if hasattr(cog, "red_get_data_for_user"):
+                # Check if the method is actually overridden by looking at where it's defined
+                # in the MRO (Method Resolution Order)
+                cog_class = cog.__class__
+                method_defined_in = None
+                
+                for cls in inspect.getmro(cog_class):
+                    if hasattr(cls, "red_get_data_for_user"):
+                        method_defined_in = cls
+                        break
+                
+                # If the method is defined in a class other than CogMixin, it's overridden
+                if method_defined_in and method_defined_in is not commands.CogMixin:
+                    cog_handlers[cog_qualname] = cog.red_get_data_for_user
 
         failures = {
             "extension": [],
