@@ -2549,7 +2549,13 @@ class Red(
 
                 for category, payload in exported:
                     try:
-                        found = find_matches(payload)
+                        # Offload potentially large payload scanning to a thread to avoid
+                        # blocking the event loop.
+                        if hasattr(asyncio, "to_thread"):
+                            found = await asyncio.to_thread(find_matches, payload)
+                        else:
+                            loop = asyncio.get_running_loop()
+                            found = await loop.run_in_executor(None, functools.partial(find_matches, payload))
                     except Exception:
                         log.exception(f"Error searching payload for cog {cog_name} category {category}")
                         found = None
@@ -2571,18 +2577,24 @@ class Red(
                     if suffix not in (".json", ".yaml", ".yml"):
                         continue
                     try:
-                        text = fpath.read_text(encoding="utf-8")
-                        if suffix == ".json":
-                            payload = json.loads(text)
-                        else:
-                            try:
+                        # Read, parse and search the file off the event loop to avoid
+                        # blocking I/O/CPU work.
+                        def _sync_parse_and_find(_p, _sfx):
+                            text = _p.read_text(encoding="utf-8")
+                            if _sfx == ".json":
+                                payload = json.loads(text)
+                            else:
                                 import yaml
 
                                 payload = yaml.safe_load(text)
-                            except Exception:
-                                # Could not parse yaml
-                                continue
-                        found = find_matches(payload)
+                            return find_matches(payload)
+
+                        if hasattr(asyncio, "to_thread"):
+                            found = await asyncio.to_thread(_sync_parse_and_find, fpath, suffix)
+                        else:
+                            loop = asyncio.get_running_loop()
+                            found = await loop.run_in_executor(None, functools.partial(_sync_parse_and_find, fpath, suffix))
+
                         if found is not None:
                             fname = f"disk_{fpath.name}"
                             buf = io.BytesIO()
