@@ -11,6 +11,7 @@ import weakref
 import functools
 import io
 import zipfile
+import json
 from collections import namedtuple, OrderedDict
 from datetime import datetime
 from importlib.machinery import ModuleSpec
@@ -2563,11 +2564,108 @@ class Red(
             except Exception as exc:
                 log.exception("Red Core Bot Data errored when handling data request")
                 failures["extension"].append("Red Core Bot Data")
+
+        async def generic_data_wrapper():
+            """
+            Generic fallback for cogs that don't implement `red_get_data_for_user`.
+
+            This will iterate over the configured storage backend's cogs and
+            attempt to find entries that reference `user_id`. If found, a
+            JSON file containing the matched entries will be added for that cog.
+            """
+            try:
+                # Get any custom group primary-key lengths for cogs
+                try:
+                    all_custom_group_data = await self._config.custom("CUSTOM_GROUPS").all()
+                except Exception:
+                    all_custom_group_data = {}
+
+                driver_cls = _drivers.get_driver_class()
+                async for cog_name, cog_id in driver_cls.aiter_cogs():
+                    # Skip cogs which already provide an explicit handler
+                    if cog_name in cog_handlers:
+                        continue
+
+                    try:
+                        driver = _drivers.get_driver(cog_name, cog_id, allow_old=True)
+                        custom_groups = all_custom_group_data.get(cog_name, {}).get(cog_id, {})
+                        exported = await driver.export_data(custom_groups)
+                    except Exception:
+                        log.exception(f"Error exporting data for cog {cog_name}")
+                        failures["extension"].append(cog_name)
+                        continue
+
+                    # Search exported data for occurrences of this user id
+                    user_str = str(user_id)
+                    matched = {}
+
+                    def find_matches(obj):
+                        """Recursively search obj for occurrences of the user id.
+
+                        Returns a representation containing only matching parts or
+                        `None` if nothing matched.
+                        """
+                        if isinstance(obj, dict):
+                            out = {}
+                            for k, v in obj.items():
+                                key_matches = k == user_str
+                                val_match = None
+                                if isinstance(v, (str, int)) and str(v) == user_str:
+                                    val_match = v
+                                else:
+                                    val_match = find_matches(v)
+
+                                if key_matches:
+                                    out[k] = v
+                                elif val_match is not None:
+                                    out[k] = val_match
+
+                            return out if out else None
+                        if isinstance(obj, list):
+                            out_list = []
+                            for it in obj:
+                                if isinstance(it, (str, int)) and str(it) == user_str:
+                                    out_list.append(it)
+                                else:
+                                    sub = find_matches(it)
+                                    if sub is not None:
+                                        out_list.append(sub)
+                            return out_list if out_list else None
+                        if isinstance(obj, (str, int)) and str(obj) == user_str:
+                            return obj
+                        return None
+
+                    for category, payload in exported:
+                        try:
+                            found = find_matches(payload)
+                        except Exception:
+                            log.exception(f"Error searching payload for cog {cog_name} category {category}")
+                            found = None
+                        if found is not None:
+                            matched[category] = found
+
+                    if matched:
+                        try:
+                            existing = data.get(cog_name, {})
+                            for cat, content in matched.items():
+                                fname = f"export_{cat}.json"
+                                buf = io.BytesIO()
+                                buf.write(json.dumps(content, indent=2).encode("utf-8"))
+                                buf.seek(0)
+                                existing[fname] = buf
+                            data[cog_name] = existing
+                        except Exception:
+                            log.exception(f"Failed building export file for {cog_name}")
+                            failures["extension"].append(cog_name)
+            except Exception:
+                log.exception("Generic data wrapper errored while scanning drivers")
+                failures["extension"].append("GenericDataScan")
         
         handlers = [
             *(wrapper(coro, "extension", name) for name, coro in extension_handlers.items()),
             *(wrapper(coro, "cog", name) for name, coro in cog_handlers.items()),
             core_data_wrapper(),
+            generic_data_wrapper(),
         ]
 
         await asyncio.gather(*handlers)
