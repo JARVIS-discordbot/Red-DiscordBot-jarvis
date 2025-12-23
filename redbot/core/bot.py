@@ -2673,7 +2673,23 @@ class Red(
                     data[sname] = result
             except commands.commands.RedUnhandledAPI:
                 log.warning(f"{stype}.{sname} did not handle data request")
-                failures["unhandled"].append(sname)
+                # If the cog/extension explicitly did not handle the request, try
+                # the generic fallback scan to see if data exists on-disk or in the
+                # storage driver. This lets cogs opt-out of providing structured
+                # exports but still have their stored data be discoverable.
+                try:
+                    matched_files = await self.scan_cog_data_for_user(sname, user_id)
+                    if matched_files:
+                        data[sname] = {**data.get(sname, {}), **matched_files}
+                        try:
+                            log.info(f"handle_data_request: generic fallback added {len(matched_files)} files for {sname}: {list(matched_files.keys())}")
+                        except Exception:
+                            pass
+                    else:
+                        failures["unhandled"].append(sname)
+                except Exception:
+                    log.exception(f"Error scanning cog {sname} after RedUnhandledAPI")
+                    failures["extension" if stype == "extension" else "cog"].append(sname)
             except Exception as exc:
                 log.exception(f"{stype}.{sname} errored when handling data request")
                 failures[stype].append(sname)
@@ -2728,6 +2744,10 @@ class Red(
                         matched_files = await self.scan_cog_data_for_user(cog_name, user_id)
                         if matched_files:
                             data[cog_name] = {**data.get(cog_name, {}), **matched_files}
+                            try:
+                                log.info(f"handle_data_request: added {len(matched_files)} files for {cog_name}: {list(matched_files.keys())}")
+                            except Exception:
+                                pass
                     except Exception:
                         log.exception(f"Error scanning cog {cog_name} with generic fallback")
                         failures["extension"].append(cog_name)
@@ -2743,6 +2763,13 @@ class Red(
         ]
 
         await asyncio.gather(*handlers)
+
+        # Debug summary of what will be returned
+        try:
+            for cog_name, files in data.items():
+                log.info(f"handle_data_request: will return {len(files)} files for {cog_name}: {list(files.keys())}")
+        except Exception:
+            pass
 
         return DataRequestResults(
             data=data,
