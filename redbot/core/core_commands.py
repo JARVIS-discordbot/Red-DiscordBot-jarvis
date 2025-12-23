@@ -1268,7 +1268,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
             candidates = set(self.bot.cogs.keys())
             try:
                 driver_cls = _drivers.get_driver_class()
-                async for name, _ in driver_cls.aiter_cogs():
+                async for name, cid in driver_cls.aiter_cogs():
                     candidates.add(name)
             except Exception:
                 pass

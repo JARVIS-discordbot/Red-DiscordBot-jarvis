@@ -2704,7 +2704,7 @@ class Red(
                 # 2) cogs reported by the driver
                 try:
                     driver_cls = _drivers.get_driver_class()
-                    async for name, _ in driver_cls.aiter_cogs():
+                    async for name, cid in driver_cls.aiter_cogs():
                         candidates.add(name)
                 except Exception:
                     log.exception("Could not iterate driver cogs")
