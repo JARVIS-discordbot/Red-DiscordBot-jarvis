@@ -2484,6 +2484,121 @@ class Red(
             unhandled=failures["unhandled"],
         )
 
+    async def scan_cog_data_for_user(self, cog_name: str, user_id: int) -> MutableMapping[str, io.BytesIO]:
+        """
+        Scan storage drivers and on-disk cog data for any entries referencing `user_id`.
+
+        Returns a mapping of filename -> BytesIO similar to `red_get_data_for_user`.
+        """
+        results = {}
+        user_str = str(user_id)
+
+        def find_matches(obj):
+            if isinstance(obj, dict):
+                out = {}
+                for k, v in obj.items():
+                    key_matches = k == user_str
+                    val_match = None
+                    if isinstance(v, (str, int)) and str(v) == user_str:
+                        val_match = v
+                    else:
+                        val_match = find_matches(v)
+
+                    if key_matches:
+                        out[k] = v
+                    elif val_match is not None:
+                        out[k] = val_match
+
+                return out if out else None
+            if isinstance(obj, list):
+                out_list = []
+                for it in obj:
+                    if isinstance(it, (str, int)) and str(it) == user_str:
+                        out_list.append(it)
+                    else:
+                        sub = find_matches(it)
+                        if sub is not None:
+                            out_list.append(sub)
+                return out_list if out_list else None
+            if isinstance(obj, (str, int)) and str(obj) == user_str:
+                return obj
+            return None
+
+        try:
+            try:
+                all_custom_group_data = await self._config.custom("CUSTOM_GROUPS").all()
+            except Exception:
+                all_custom_group_data = {}
+
+            # Try driver-reported ids for the cog
+            driver_cls = _drivers.get_driver_class()
+            cog_ids = []
+            async for name, cid in driver_cls.aiter_cogs():
+                if name == cog_name:
+                    cog_ids.append(cid)
+
+            for cid in cog_ids:
+                try:
+                    driver = _drivers.get_driver(cog_name, cid, allow_old=True)
+                    custom_groups = all_custom_group_data.get(cog_name, {}).get(cid, {})
+                    exported = await driver.export_data(custom_groups)
+                except Exception:
+                    log.exception(f"Error exporting driver data for cog {cog_name} id {cid}")
+                    continue
+
+                for category, payload in exported:
+                    try:
+                        found = find_matches(payload)
+                    except Exception:
+                        log.exception(f"Error searching payload for cog {cog_name} category {category}")
+                        found = None
+                    if found is not None:
+                        fname = f"export_{category}_{cid}.json"
+                        buf = io.BytesIO()
+                        buf.write(json.dumps(found, indent=2).encode("utf-8"))
+                        buf.seek(0)
+                        results[fname] = buf
+
+            # Also check on-disk files under cog_data_path
+            try:
+                cog_path = data_manager.cog_data_path(raw_name=cog_name)
+                for fpath in cog_path.iterdir():
+                    if not fpath.is_file():
+                        continue
+                    suffix = fpath.suffix.lower()
+                    if suffix not in (".json", ".yaml", ".yml"):
+                        continue
+                    try:
+                        text = fpath.read_text(encoding="utf-8")
+                        if suffix == ".json":
+                            payload = json.loads(text)
+                        else:
+                            try:
+                                import yaml
+
+                                payload = yaml.safe_load(text)
+                            except Exception:
+                                # Could not parse yaml
+                                continue
+                        found = find_matches(payload)
+                        if found is not None:
+                            fname = f"disk_{fpath.name}"
+                            buf = io.BytesIO()
+                            buf.write(json.dumps(found, indent=2).encode("utf-8"))
+                            buf.seek(0)
+                            results[fname] = buf
+                    except Exception:
+                        log.exception(f"Failed scanning file {fpath} for cog {cog_name}")
+                        continue
+            except Exception:
+                # If cog data path is unavailable, just skip
+                pass
+
+        except Exception:
+            log.exception(f"scan_cog_data_for_user errored for {cog_name}")
+
+        return results
+
     async def handle_data_request(
         self,
         *,
@@ -2569,94 +2684,46 @@ class Red(
             """
             Generic fallback for cogs that don't implement `red_get_data_for_user`.
 
-            This will iterate over the configured storage backend's cogs and
-            attempt to find entries that reference `user_id`. If found, a
-            JSON file containing the matched entries will be added for that cog.
+            This will try multiple discovery sources (loaded cogs, driver-reported
+            cogs, and on-disk cog data folders) and use `scan_cog_data_for_user`
+            to collect any files referencing `user_id`.
             """
             try:
-                # Get any custom group primary-key lengths for cogs
-                try:
-                    all_custom_group_data = await self._config.custom("CUSTOM_GROUPS").all()
-                except Exception:
-                    all_custom_group_data = {}
+                candidates = set()
 
-                driver_cls = _drivers.get_driver_class()
-                async for cog_name, cog_id in driver_cls.aiter_cogs():
+                # 1) cogs currently loaded
+                candidates.update(self.cogs.keys())
+
+                # 2) cogs reported by the driver
+                try:
+                    driver_cls = _drivers.get_driver_class()
+                    async for name, _ in driver_cls.aiter_cogs():
+                        candidates.add(name)
+                except Exception:
+                    log.exception("Could not iterate driver cogs")
+
+                # 3) on-disk cog data directories
+                try:
+                    base = data_manager.cog_data_path()
+                    for entry in base.iterdir():
+                        if entry.is_dir():
+                            candidates.add(entry.stem)
+                except Exception:
+                    # If config hasn't been loaded yet or path is unavailable, ignore
+                    pass
+
+                for cog_name in sorted(candidates):
                     # Skip cogs which already provide an explicit handler
                     if cog_name in cog_handlers:
                         continue
 
                     try:
-                        driver = _drivers.get_driver(cog_name, cog_id, allow_old=True)
-                        custom_groups = all_custom_group_data.get(cog_name, {}).get(cog_id, {})
-                        exported = await driver.export_data(custom_groups)
+                        matched_files = await self.scan_cog_data_for_user(cog_name, user_id)
+                        if matched_files:
+                            data[cog_name] = {**data.get(cog_name, {}), **matched_files}
                     except Exception:
-                        log.exception(f"Error exporting data for cog {cog_name}")
+                        log.exception(f"Error scanning cog {cog_name} with generic fallback")
                         failures["extension"].append(cog_name)
-                        continue
-
-                    # Search exported data for occurrences of this user id
-                    user_str = str(user_id)
-                    matched = {}
-
-                    def find_matches(obj):
-                        """Recursively search obj for occurrences of the user id.
-
-                        Returns a representation containing only matching parts or
-                        `None` if nothing matched.
-                        """
-                        if isinstance(obj, dict):
-                            out = {}
-                            for k, v in obj.items():
-                                key_matches = k == user_str
-                                val_match = None
-                                if isinstance(v, (str, int)) and str(v) == user_str:
-                                    val_match = v
-                                else:
-                                    val_match = find_matches(v)
-
-                                if key_matches:
-                                    out[k] = v
-                                elif val_match is not None:
-                                    out[k] = val_match
-
-                            return out if out else None
-                        if isinstance(obj, list):
-                            out_list = []
-                            for it in obj:
-                                if isinstance(it, (str, int)) and str(it) == user_str:
-                                    out_list.append(it)
-                                else:
-                                    sub = find_matches(it)
-                                    if sub is not None:
-                                        out_list.append(sub)
-                            return out_list if out_list else None
-                        if isinstance(obj, (str, int)) and str(obj) == user_str:
-                            return obj
-                        return None
-
-                    for category, payload in exported:
-                        try:
-                            found = find_matches(payload)
-                        except Exception:
-                            log.exception(f"Error searching payload for cog {cog_name} category {category}")
-                            found = None
-                        if found is not None:
-                            matched[category] = found
-
-                    if matched:
-                        try:
-                            existing = data.get(cog_name, {})
-                            for cat, content in matched.items():
-                                fname = f"export_{cat}.json"
-                                buf = io.BytesIO()
-                                buf.write(json.dumps(content, indent=2).encode("utf-8"))
-                                buf.seek(0)
-                                existing[fname] = buf
-                            data[cog_name] = existing
-                        except Exception:
-                            log.exception(f"Failed building export file for {cog_name}")
-                            failures["extension"].append(cog_name)
             except Exception:
                 log.exception("Generic data wrapper errored while scanning drivers")
                 failures["extension"].append("GenericDataScan")

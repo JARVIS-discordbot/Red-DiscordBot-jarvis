@@ -888,14 +888,29 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
                     # If it doesn't raise, it's implemented (even if it returns empty)
                     implemented.append(cog_name)
                 except commands.commands.RedUnhandledAPI:
-                    # Base implementation raises this
-                    not_implemented.append(cog_name)
+                    # Base implementation raises this; try generic fallback scan to check for stored data
+                    try:
+                        fallback = await ctx.bot.scan_cog_data_for_user(cog_name, test_user_id)
+                        if fallback:
+                            implemented.append(cog_name)
+                        else:
+                            not_implemented.append(cog_name)
+                    except Exception:
+                        not_implemented.append(cog_name)
                 except Exception:
                     # Other exceptions might mean it's implemented but errored
                     # We'll count it as implemented since it tried to do something
                     implemented.append(cog_name)
             else:
-                not_implemented.append(cog_name)
+                # Cog doesn't have the API - try the generic fallback to see if it stores data
+                try:
+                    fallback = await ctx.bot.scan_cog_data_for_user(cog_name, test_user_id)
+                    if fallback:
+                        implemented.append(cog_name)
+                    else:
+                        not_implemented.append(cog_name)
+                except Exception:
+                    not_implemented.append(cog_name)
         
         message_parts = [
             _("**Cogs that provide data:**"),
