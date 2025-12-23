@@ -1251,6 +1251,54 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
                 )
             )
 
+    @mydata_owner_management.command(name="debugscan")
+    async def mydata_owner_debug_scan(self, ctx, user_id: int, cog_name: str = None):
+        """
+        Debug helper: scan cogs (or a single cog) using the generic fallback for matches.
+
+        **Arguments:**
+        - `<user_id>` - The user id to scan for.
+        - `[cog_name]` - Optional cog name to scan only that cog.
+        """
+        await ctx.send(_(f"Scanning for user {user_id}..."))
+        results = {}
+        candidates = [cog_name] if cog_name else None
+        if candidates is None:
+            # Build candidates like the fallback does
+            candidates = set(self.bot.cogs.keys())
+            try:
+                driver_cls = _drivers.get_driver_class()
+                async for name, _ in driver_cls.aiter_cogs():
+                    candidates.add(name)
+            except Exception:
+                pass
+            try:
+                base = data_manager.cog_data_path()
+                for entry in base.iterdir():
+                    if entry.is_dir():
+                        candidates.add(entry.stem)
+            except Exception:
+                pass
+
+        for name in sorted(candidates):
+            try:
+                matched = await self.bot.scan_cog_data_for_user(name, user_id)
+                if matched:
+                    results[name] = list(matched.keys())
+            except Exception:
+                # Skip errors, but note them
+                results[name] = ["ERROR"]
+
+        if not results:
+            await ctx.send(_("No matching data found."))
+            return
+
+        lines = [f"**Scan results for user {user_id}:**"]
+        for cog, files in results.items():
+            lines.append(f"- {cog}: {', '.join(files)}")
+
+        await ctx.send("\n".join(lines))
+
     @commands.group()
     async def embedset(self, ctx: commands.Context):
         """

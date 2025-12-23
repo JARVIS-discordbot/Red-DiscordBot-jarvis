@@ -2530,6 +2530,7 @@ class Red(
             except Exception:
                 all_custom_group_data = {}
 
+            log.debug(f"Scanning driver-exported data for cog {cog_name}")
             # Try driver-reported ids for the cog
             driver_cls = _drivers.get_driver_class()
             cog_ids = []
@@ -2562,6 +2563,7 @@ class Red(
             # Also check on-disk files under cog_data_path
             try:
                 cog_path = data_manager.cog_data_path(raw_name=cog_name)
+                log.debug(f"Scanning files in {cog_path} for cog {cog_name}")
                 for fpath in cog_path.iterdir():
                     if not fpath.is_file():
                         continue
@@ -2593,6 +2595,11 @@ class Red(
             except Exception:
                 # If cog data path is unavailable, just skip
                 pass
+
+            if results:
+                log.info(f"Found {len(results)} matching files for cog {cog_name}: {list(results.keys())}")
+            else:
+                log.debug(f"No matches found for cog {cog_name}")
 
         except Exception:
             log.exception(f"scan_cog_data_for_user errored for {cog_name}")
