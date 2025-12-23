@@ -16,6 +16,7 @@ import psutil
 import getpass
 import pip
 import traceback
+import zipfile
 from pathlib import Path
 from collections import defaultdict
 from redbot.core import app_commands, data_manager
@@ -799,13 +800,154 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
     @commands.cooldown(1, 7200, commands.BucketType.user)
     @mydata.command(cls=commands.commands._AlwaysAvailableCommand, name="getmydata")
     async def mydata_getdata(self, ctx: commands.Context):
-        """[Coming Soon] Get what data [botname] has about you."""
-        await ctx.send(
-            _(
-                "This command doesn't do anything yet, "
-                "but we're working on adding support for this."
+        """Get what data [botname] has about you.
+        
+        This will send you a zip file containing all the data the bot has stored about you.
+        
+        **Example:**
+        - `[p]mydata getmydata`
+        """
+        await ctx.send(_("Collecting your data. This may take a moment..."))
+        
+        try:
+            results = await self.bot.handle_data_request(user_id=ctx.author.id)
+        except Exception as exc:
+            log.exception("Error collecting user data")
+            await ctx.send(
+                _(
+                    "An error occurred while collecting your data. "
+                    "Please contact the bot owner if this persists."
+                )
             )
-        )
+            return
+        
+        if not results.data:
+            await ctx.send(
+                _(
+                    "I don't have any stored data about you {mention}."
+                ).format(mention=ctx.author.mention)
+            )
+            return
+        
+        # Create a zip file with all the data
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for cog_name, cog_data in results.data.items():
+                # Create a folder for each cog/extension
+                safe_cog_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in cog_name)
+                for filename, file_data in cog_data.items():
+                    # Reset file pointer to beginning
+                    file_data.seek(0)
+                    # Add file to zip with cog name as folder
+                    zip_file.writestr(f"{safe_cog_name}/{filename}", file_data.read())
+        
+        zip_buffer.seek(0)
+        
+        # Send the zip file
+        file = discord.File(zip_buffer, filename=f"my_data_{ctx.author.id}.zip")
+        
+        message_parts = [
+            _("Here is the data I have stored about you {mention}.").format(mention=ctx.author.mention)
+        ]
+        
+        if results.failed_cogs or results.failed_modules:
+            message_parts.append(
+                _(
+                    "\n⚠️ Note: Some modules or cogs encountered errors while collecting data: "
+                    "{items}. Please contact the bot owner if you need this data."
+                ).format(
+                    items=humanize_list(results.failed_cogs + results.failed_modules)
+                )
+            )
+        
+        if results.unhandled:
+            message_parts.append(
+                _(
+                    "\nℹ️ Note: The following cogs did not provide data: {cogs}. "
+                    "This may be normal if they don't store user data."
+                ).format(cogs=humanize_list(results.unhandled))
+            )
+        
+        await ctx.send("\n".join(message_parts), file=file)
+
+    @commands.cooldown(1, 300, commands.BucketType.user)
+    @mydata.command(cls=commands.commands._AlwaysAvailableCommand, name="whichcogs")
+    async def mydata_whichcogs(self, ctx: commands.Context):
+        """Check which cogs implement data retrieval.
+        
+        This shows which cogs have implemented the `red_get_data_for_user` method
+        and will provide data when you use `[p]mydata getmydata`.
+        
+        **Example:**
+        - `[p]mydata whichcogs`
+        """
+        await ctx.send(_("Checking which cogs implement data retrieval..."))
+        
+        implemented = []
+        not_implemented = []
+        
+        # Use a dummy user ID to test
+        test_user_id = 123456789
+        
+        for cog_name, cog in self.bot.cogs.items():
+            if hasattr(cog, "red_get_data_for_user"):
+                try:
+                    # Try to call the method - if it raises RedUnhandledAPI, it's not implemented
+                    result = await cog.red_get_data_for_user(user_id=test_user_id)
+                    # If it doesn't raise, it's implemented (even if it returns empty)
+                    implemented.append(cog_name)
+                except commands.commands.RedUnhandledAPI:
+                    # Base implementation raises this; try generic fallback scan to check for stored data
+                    try:
+                        fallback = await ctx.bot.scan_cog_data_for_user(cog_name, test_user_id)
+                        if fallback:
+                            implemented.append(cog_name)
+                        else:
+                            not_implemented.append(cog_name)
+                    except Exception:
+                        not_implemented.append(cog_name)
+                except Exception:
+                    # Other exceptions might mean it's implemented but errored
+                    # We'll count it as implemented since it tried to do something
+                    implemented.append(cog_name)
+            else:
+                # Cog doesn't have the API - try the generic fallback to see if it stores data
+                try:
+                    fallback = await ctx.bot.scan_cog_data_for_user(cog_name, test_user_id)
+                    if fallback:
+                        implemented.append(cog_name)
+                    else:
+                        not_implemented.append(cog_name)
+                except Exception:
+                    not_implemented.append(cog_name)
+        
+        message_parts = [
+            _("**Cogs that provide data:**"),
+        ]
+        
+        if implemented:
+            message_parts.append(humanize_list(implemented))
+        else:
+            message_parts.append(_("None"))
+        
+        message_parts.append("")
+        message_parts.append(_("**Cogs that don't provide data:**"))
+        
+        if not_implemented:
+            # Show first 15 to avoid message length issues
+            shown = not_implemented[:15]
+            message_parts.append(humanize_list(shown))
+            if len(not_implemented) > 15:
+                message_parts.append(_("\n... and {count} more.").format(count=len(not_implemented) - 15))
+        else:
+            message_parts.append(_("None"))
+        
+        message_parts.append("")
+        message_parts.append(_("Note: Cogs that don't implement this method may still store data,"))
+        message_parts.append(_("but it won't be included in `{prefix}mydata getmydata` until they add support.").format(prefix=ctx.clean_prefix))
+        
+        for page in pagify("\n".join(message_parts)):
+            await ctx.send(page)
 
     @commands.is_owner()
     @mydata.group(name="ownermanagement")
@@ -1117,6 +1259,54 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
                     mention=ctx.author.mention, cogs=humanize_list(results.unhandled)
                 )
             )
+
+    @mydata_owner_management.command(name="debugscan")
+    async def mydata_owner_debug_scan(self, ctx, user_id: int, cog_name: str = None):
+        """
+        Debug helper: scan cogs (or a single cog) using the generic fallback for matches.
+
+        **Arguments:**
+        - `<user_id>` - The user id to scan for.
+        - `[cog_name]` - Optional cog name to scan only that cog.
+        """
+        await ctx.send(_(f"Scanning for user {user_id}..."))
+        results = {}
+        candidates = [cog_name] if cog_name else None
+        if candidates is None:
+            # Build candidates like the fallback does
+            candidates = set(self.bot.cogs.keys())
+            try:
+                driver_cls = _drivers.get_driver_class()
+                async for name, cid in driver_cls.aiter_cogs():
+                    candidates.add(name)
+            except Exception:
+                pass
+            try:
+                base = data_manager.cog_data_path()
+                for entry in base.iterdir():
+                    if entry.is_dir():
+                        candidates.add(entry.stem)
+            except Exception:
+                pass
+
+        for name in sorted(candidates):
+            try:
+                matched = await self.bot.scan_cog_data_for_user(name, user_id)
+                if matched:
+                    results[name] = list(matched.keys())
+            except Exception:
+                # Skip errors, but note them
+                results[name] = ["ERROR"]
+
+        if not results:
+            await ctx.send(_("No matching data found."))
+            return
+
+        lines = [f"**Scan results for user {user_id}:**"]
+        for cog, files in results.items():
+            lines.append(f"- {cog}: {', '.join(files)}")
+
+        await ctx.send("\n".join(lines))
 
     @commands.group()
     async def embedset(self, ctx: commands.Context):

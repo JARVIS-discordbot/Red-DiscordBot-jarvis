@@ -9,6 +9,9 @@ import sys
 import contextlib
 import weakref
 import functools
+import io
+import zipfile
+import json
 from collections import namedtuple, OrderedDict
 from datetime import datetime
 from importlib.machinery import ModuleSpec
@@ -76,6 +79,7 @@ __all__ = ("Red",)
 NotMessage = namedtuple("NotMessage", "guild")
 
 DataDeletionResults = namedtuple("DataDeletionResults", "failed_modules failed_cogs unhandled")
+DataRequestResults = namedtuple("DataRequestResults", "data failed_modules failed_cogs unhandled")
 
 PreInvokeCoroutine = Callable[[commands.Context], Awaitable[Any]]
 T_BIC = TypeVar("T_BIC", bound=PreInvokeCoroutine)
@@ -2312,6 +2316,65 @@ class Red(
 
         await self._whiteblacklist_cache.discord_deleted_user(user_id)
 
+    async def _core_data_request(self, *, user_id: int) -> MutableMapping[str, io.BytesIO]:
+        """
+        Get core bot data for a user.
+        
+        This includes user-specific configuration data.
+        """
+        user_data = {}
+        user_config = await self._config.user_from_id(user_id).all()
+        
+        config_parts = []
+        config_parts.append(f"User Configuration Data for User ID: {user_id}")
+        config_parts.append("=" * 50)
+        config_parts.append("")
+        
+        if user_config:
+            for key, value in sorted(user_config.items()):
+                if value is None:
+                    config_parts.append(f"{key}: None (not set)")
+                elif isinstance(value, (dict, list)):
+                    config_parts.append(f"{key}:")
+                    config_parts.append(f"  {value}")
+                else:
+                    config_parts.append(f"{key}: {value}")
+        else:
+            config_parts.append("No user-specific configuration data found.")
+        
+        config_parts.append("")
+        config_parts.append("=" * 50)
+        config_parts.append("")
+        config_parts.append("Note: This is only core bot configuration data.")
+        config_parts.append("Other cogs may store additional data if they implement")
+        config_parts.append("the red_get_data_for_user method.")
+        
+        config_str = "\n".join(config_parts)
+        config_bytes = io.BytesIO(config_str.encode('utf-8'))
+        user_data["user_config.txt"] = config_bytes
+        
+        # Check for guild-specific data
+        all_guilds = await self._config.all_guilds()
+        guild_data_list = []
+        
+        async for guild_id, guild_data in AsyncIter(all_guilds.items(), steps=100):
+            if user_id in guild_data.get("autoimmune_ids", []):
+                try:
+                    guild = self.get_guild(guild_id)
+                    guild_name = guild.name if guild else f"Unknown Guild (ID: {guild_id})"
+                    guild_data_list.append(f"Guild: {guild_name} (ID: {guild_id}) - Listed in autoimmune_ids")
+                except Exception:
+                    guild_data_list.append(f"Guild ID {guild_id}: Listed in autoimmune_ids")
+        
+        if guild_data_list:
+            guild_str = f"Guild-Specific Data for User ID: {user_id}\n"
+            guild_str += "=" * 50 + "\n\n"
+            guild_str += "\n".join(guild_data_list)
+            guild_bytes = io.BytesIO(guild_str.encode('utf-8'))
+            user_data["guild_data.txt"] = guild_bytes
+        
+        return user_data
+
     async def handle_data_deletion_request(
         self,
         *,
@@ -2403,6 +2466,300 @@ class Red(
         await asyncio.gather(*handlers)
 
         return DataDeletionResults(
+            failed_modules=failures["extension"],
+            failed_cogs=failures["cog"],
+            unhandled=failures["unhandled"],
+        )
+
+    async def scan_cog_data_for_user(self, cog_name: str, user_id: int) -> MutableMapping[str, io.BytesIO]:
+        """
+        Scan storage drivers and on-disk cog data for any entries referencing `user_id`.
+
+        Returns a mapping of filename -> BytesIO similar to `red_get_data_for_user`.
+        """
+        results = {}
+        user_str = str(user_id)
+
+        def find_matches(obj):
+            if isinstance(obj, dict):
+                out = {}
+                for k, v in obj.items():
+                    key_matches = k == user_str
+                    val_match = None
+                    if isinstance(v, (str, int)) and str(v) == user_str:
+                        val_match = v
+                    else:
+                        val_match = find_matches(v)
+
+                    if key_matches:
+                        out[k] = v
+                    elif val_match is not None:
+                        out[k] = val_match
+
+                return out if out else None
+            if isinstance(obj, list):
+                out_list = []
+                for it in obj:
+                    if isinstance(it, (str, int)) and str(it) == user_str:
+                        out_list.append(it)
+                    else:
+                        sub = find_matches(it)
+                        if sub is not None:
+                            out_list.append(sub)
+                return out_list if out_list else None
+            if isinstance(obj, (str, int)) and str(obj) == user_str:
+                return obj
+            return None
+
+        try:
+            try:
+                all_custom_group_data = await self._config.custom("CUSTOM_GROUPS").all()
+            except Exception:
+                all_custom_group_data = {}
+
+            log.debug(f"Scanning driver-exported data for cog {cog_name}")
+            # Try driver-reported ids for the cog
+            driver_cls = _drivers.get_driver_class()
+            cog_ids = []
+            async for name, cid in driver_cls.aiter_cogs():
+                if name == cog_name:
+                    cog_ids.append(cid)
+
+            for cid in cog_ids:
+                try:
+                    driver = _drivers.get_driver(cog_name, cid, allow_old=True)
+                    custom_groups = all_custom_group_data.get(cog_name, {}).get(cid, {})
+                    exported = await driver.export_data(custom_groups)
+                except Exception:
+                    log.exception(f"Error exporting driver data for cog {cog_name} id {cid}")
+                    continue
+
+                for category, payload in exported:
+                    try:
+                        found = find_matches(payload)
+                    except Exception:
+                        log.exception(f"Error searching payload for cog {cog_name} category {category}")
+                        found = None
+                    if found is not None:
+                        fname = f"export_{category}_{cid}.json"
+                        buf = io.BytesIO()
+                        buf.write(json.dumps(found, indent=2).encode("utf-8"))
+                        buf.seek(0)
+                        results[fname] = buf
+
+            # Also check on-disk files under cog_data_path
+            try:
+                cog_path = data_manager.cog_data_path(raw_name=cog_name)
+                log.debug(f"Scanning files in {cog_path} for cog {cog_name}")
+                for fpath in cog_path.iterdir():
+                    if not fpath.is_file():
+                        continue
+                    suffix = fpath.suffix.lower()
+                    if suffix not in (".json", ".yaml", ".yml"):
+                        continue
+                    try:
+                        text = fpath.read_text(encoding="utf-8")
+                        if suffix == ".json":
+                            payload = json.loads(text)
+                        else:
+                            try:
+                                import yaml
+
+                                payload = yaml.safe_load(text)
+                            except Exception:
+                                # Could not parse yaml
+                                continue
+                        found = find_matches(payload)
+                        if found is not None:
+                            fname = f"disk_{fpath.name}"
+                            buf = io.BytesIO()
+                            buf.write(json.dumps(found, indent=2).encode("utf-8"))
+                            buf.seek(0)
+                            results[fname] = buf
+                    except Exception:
+                        log.exception(f"Failed scanning file {fpath} for cog {cog_name}")
+                        continue
+            except Exception:
+                # If cog data path is unavailable, just skip
+                pass
+
+            if results:
+                log.info(f"Found {len(results)} matching files for cog {cog_name}: {list(results.keys())}")
+            else:
+                log.debug(f"No matches found for cog {cog_name}")
+
+        except Exception:
+            log.exception(f"scan_cog_data_for_user errored for {cog_name}")
+
+        return results
+
+    async def handle_data_request(
+        self,
+        *,
+        user_id: int,
+    ) -> DataRequestResults:
+        """
+        This tells each cog and extension to provide data for a user.
+
+        Calling this should be limited to interfaces designed for it.
+
+        See ``redbot.core.commands.Cog.red_get_data_for_user``
+        for details about the parameters and intent.
+
+        Parameters
+        ----------
+        user_id
+            The user ID to get data for.
+
+        Returns
+        -------
+        DataRequestResults
+            A named tuple ``(data, failed_modules, failed_cogs, unhandled)``
+            containing a mapping of cog/extension names to their data,
+            lists with names of failed modules, failed cogs,
+            and cogs that didn't handle data request.
+        """
+        await self.wait_until_red_ready()
+        
+        extension_handlers = {
+            extension_name: handler
+            for extension_name, extension in self.extensions.items()
+            if (handler := getattr(extension, "red_get_data_for_user", None))
+        }
+
+        # Only include cogs that actually override the method, not just inherit it
+        cog_handlers = {}
+        
+        for cog_qualname, cog in self.cogs.items():
+            if hasattr(cog, "red_get_data_for_user"):
+                # Check if the method is actually overridden by looking at where it's defined
+                # in the MRO (Method Resolution Order)
+                cog_class = cog.__class__
+                method_defined_in = None
+                
+                for cls in inspect.getmro(cog_class):
+                    if hasattr(cls, "red_get_data_for_user"):
+                        method_defined_in = cls
+                        break
+                
+                # If the method is defined in a class other than CogMixin, it's overridden
+                if method_defined_in and method_defined_in is not commands.CogMixin:
+                    cog_handlers[cog_qualname] = cog.red_get_data_for_user
+
+        failures = {
+            "extension": [],
+            "cog": [],
+            "unhandled": [],
+        }
+        data = {}
+
+        async def wrapper(func, stype, sname):
+            try:
+                result = await func(user_id=user_id)
+                if result:
+                    data[sname] = result
+            except commands.commands.RedUnhandledAPI:
+                log.warning(f"{stype}.{sname} did not handle data request")
+                # If the cog/extension explicitly did not handle the request, try
+                # the generic fallback scan to see if data exists on-disk or in the
+                # storage driver. This lets cogs opt-out of providing structured
+                # exports but still have their stored data be discoverable.
+                try:
+                    matched_files = await self.scan_cog_data_for_user(sname, user_id)
+                    if matched_files:
+                        data[sname] = {**data.get(sname, {}), **matched_files}
+                        try:
+                            log.info(f"handle_data_request: generic fallback added {len(matched_files)} files for {sname}: {list(matched_files.keys())}")
+                        except Exception:
+                            pass
+                    else:
+                        failures["unhandled"].append(sname)
+                except Exception:
+                    log.exception(f"Error scanning cog {sname} after RedUnhandledAPI")
+                    failures["extension" if stype == "extension" else "cog"].append(sname)
+            except Exception as exc:
+                log.exception(f"{stype}.{sname} errored when handling data request")
+                failures[stype].append(sname)
+
+        async def core_data_wrapper():
+            try:
+                core_data = await self._core_data_request(user_id=user_id)
+                if core_data:
+                    data["Red Core Bot Data"] = core_data
+            except Exception as exc:
+                log.exception("Red Core Bot Data errored when handling data request")
+                failures["extension"].append("Red Core Bot Data")
+
+        async def generic_data_wrapper():
+            """
+            Generic fallback for cogs that don't implement `red_get_data_for_user`.
+
+            This will try multiple discovery sources (loaded cogs, driver-reported
+            cogs, and on-disk cog data folders) and use `scan_cog_data_for_user`
+            to collect any files referencing `user_id`.
+            """
+            try:
+                candidates = set()
+
+                # 1) cogs currently loaded
+                candidates.update(self.cogs.keys())
+
+                # 2) cogs reported by the driver
+                try:
+                    driver_cls = _drivers.get_driver_class()
+                    async for name, cid in driver_cls.aiter_cogs():
+                        candidates.add(name)
+                except Exception:
+                    log.exception("Could not iterate driver cogs")
+
+                # 3) on-disk cog data directories
+                try:
+                    base = data_manager.cog_data_path()
+                    for entry in base.iterdir():
+                        if entry.is_dir():
+                            candidates.add(entry.stem)
+                except Exception:
+                    # If config hasn't been loaded yet or path is unavailable, ignore
+                    pass
+
+                for cog_name in sorted(candidates):
+                    # Skip cogs which already provide an explicit handler
+                    if cog_name in cog_handlers:
+                        continue
+
+                    try:
+                        matched_files = await self.scan_cog_data_for_user(cog_name, user_id)
+                        if matched_files:
+                            data[cog_name] = {**data.get(cog_name, {}), **matched_files}
+                            try:
+                                log.info(f"handle_data_request: added {len(matched_files)} files for {cog_name}: {list(matched_files.keys())}")
+                            except Exception:
+                                pass
+                    except Exception:
+                        log.exception(f"Error scanning cog {cog_name} with generic fallback")
+                        failures["extension"].append(cog_name)
+            except Exception:
+                log.exception("Generic data wrapper errored while scanning drivers")
+                failures["extension"].append("GenericDataScan")
+        
+        handlers = [
+            *(wrapper(coro, "extension", name) for name, coro in extension_handlers.items()),
+            *(wrapper(coro, "cog", name) for name, coro in cog_handlers.items()),
+            core_data_wrapper(),
+            generic_data_wrapper(),
+        ]
+
+        await asyncio.gather(*handlers)
+
+        # Debug summary of what will be returned
+        try:
+            for cog_name, files in data.items():
+                log.info(f"handle_data_request: will return {len(files)} files for {cog_name}: {list(files.keys())}")
+        except Exception:
+            pass
+
+        return DataRequestResults(
+            data=data,
             failed_modules=failures["extension"],
             failed_cogs=failures["cog"],
             unhandled=failures["unhandled"],
