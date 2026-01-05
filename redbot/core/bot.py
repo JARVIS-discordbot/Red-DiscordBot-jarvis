@@ -232,6 +232,11 @@ class Red(
         kwargs["max_messages"] = message_cache_size
         self._max_messages = message_cache_size
 
+        # Allow overriding the shard count from the CLI. If not provided, discord.py's
+        # auto-sharding behavior will be used.
+        if getattr(cli_flags, "shard_count", None) is not None:
+            kwargs["shard_count"] = cli_flags.shard_count
+
         self._uptime = None
         self._checked_time_accuracy = None
 

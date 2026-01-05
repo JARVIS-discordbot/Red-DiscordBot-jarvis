@@ -120,6 +120,17 @@ def non_negative_int(arg: str) -> int:
     return x
 
 
+def positive_int(arg: str) -> int:
+    """Like :func:`non_negative_int`, but requires the value to be >= 1.
+
+    Used for CLI flags such as ``--shard-count`` which must be at least 1.
+    """
+    x = non_negative_int(arg)
+    if x < 1:
+        raise argparse.ArgumentTypeError("The argument has to be an integer greater than or equal to 1.")
+    return x
+
+
 def message_cache_size_int(arg: str) -> int:
     x = non_negative_int(arg)
     if x < 1000:
@@ -287,6 +298,12 @@ def parse_cli_flags(args):
     )
     parser.add_argument(
         "--no-message-cache", action="store_true", help="Disable the internal message cache."
+    )
+    parser.add_argument(
+        "--shard-count",
+        type=positive_int,
+        default=None,
+        help="Set an explicit number of shards to use (overrides auto-sharding).",
     )
     parser.add_argument(
         "--disable-intent",
