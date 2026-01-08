@@ -29,13 +29,13 @@ def get_max_allocation_size(exec) -> Tuple[int, bool]:
         max_heap_allowed = psutil.virtual_memory().total
         thinks_is_64_bit = True
     else:
-        max_heap_allowed = min(4 * 1024 ** 3, psutil.virtual_memory().total)
+        max_heap_allowed = min(4 * 1024**3, psutil.virtual_memory().total)
         thinks_is_64_bit = False
     return max_heap_allowed, thinks_is_64_bit
 
 
 def get_jar_ram_defaults() -> Tuple[str, str]:
-    min_ram = 64 * 1024 ** 2
+    min_ram = 64 * 1024**2
     # We don't know the java executable at this stage - not worth the extra work required here
     max_allocation, is_64bit = get_max_allocation_size(sys.executable)
     max_ram_allowed = min(max_allocation, psutil.virtual_memory().total * 0.5)

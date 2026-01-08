@@ -54,7 +54,7 @@ class Cleanup(commands.Cog):
         if ctx.assume_yes:
             return True
 
-        if number > 2 ** 63 - 1:
+        if number > 2**63 - 1:
             return await ctx.send(_("Try a smaller number instead."))
 
         prompt = await ctx.send(

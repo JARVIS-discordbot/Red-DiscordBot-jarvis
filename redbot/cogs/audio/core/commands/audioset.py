@@ -762,7 +762,7 @@ class AudioSetCommands(MixinMeta, metaclass=CompositeMetaClass):
                 title=_("Invalid Price"),
                 description=_("Price can't be less than zero."),
             )
-        elif price > 2 ** 63 - 1:
+        elif price > 2**63 - 1:
             return await self.send_embed_msg(
                 ctx,
                 title=_("Invalid Price"),

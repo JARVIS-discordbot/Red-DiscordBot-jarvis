@@ -3,7 +3,7 @@ from redbot.core.i18n import Translator
 
 _ = Translator("Cleanup", __file__)
 
-SNOWFLAKE_THRESHOLD = 2 ** 63
+SNOWFLAKE_THRESHOLD = 2**63
 
 
 class RawMessageIds(Converter):

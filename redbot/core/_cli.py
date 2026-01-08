@@ -127,7 +127,9 @@ def positive_int(arg: str) -> int:
     """
     x = non_negative_int(arg)
     if x < 1:
-        raise argparse.ArgumentTypeError("The argument has to be an integer greater than or equal to 1.")
+        raise argparse.ArgumentTypeError(
+            "The argument has to be an integer greater than or equal to 1."
+        )
     return x
 
 
