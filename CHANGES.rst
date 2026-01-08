@@ -318,7 +318,7 @@ Developer changelog
 Changes
 *******
 
-- **Core - i18n** - Added `redbot.core.i18n.set_contextual_locale()` and `redbot.core.i18n.set_contextual_regional_format()` functions (:issue:`6022`)
+- **Core - i18n** - Added :func:`redbot.core.i18n.set_contextual_locale` and :func:`redbot.core.i18n.set_contextual_regional_format` functions (:issue:`6022`)
 
 ----
 
