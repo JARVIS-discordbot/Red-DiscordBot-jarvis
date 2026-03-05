@@ -388,6 +388,9 @@ def init_events(bot, cli_flags):
                     message = inline(_("Error in command '{command}'."))
             await ctx.send(message.replace("{command}", ctx.command.qualified_name))
         elif isinstance(error, commands.CommandNotFound):
+            if not await bot.message_eligible_as_command(ctx.message):
+                return
+
             help_settings = await HelpSettings.from_context(ctx)
             fuzzy_commands = await fuzzy_command_search(
                 ctx,
