@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from random import choice
 from string import ascii_letters
-from typing import ClassVar, List, Optional, Tuple
+from typing import ClassVar, Dict, List, Optional, Tuple
 
 import aiohttp
 import discord
@@ -117,12 +117,27 @@ class Stream:
 class YoutubeStream(Stream):
     token_name = "youtube"
     platform_name = "YouTube"
+    # Re-check videos previously flagged as non-live after a short cooldown.
+    # This avoids false offline results when YouTube updates metadata late.
+    NOT_LIVE_RECHECK_INTERVAL = 300
 
     def __init__(self, **kwargs):
         self.id = kwargs.pop("id", None)
         self._token = kwargs.pop("token", None)
         self._config = kwargs.pop("config")
-        self.not_livestreams: List[str] = []
+        raw_not_livestreams = kwargs.pop("not_livestreams", {})
+        if isinstance(raw_not_livestreams, list):
+            # Backward compatibility with previously persisted list format.
+            self.not_livestreams: Dict[str, float] = {
+                video_id: 0.0 for video_id in raw_not_livestreams
+            }
+        elif isinstance(raw_not_livestreams, dict):
+            self.not_livestreams = {
+                str(video_id): float(last_checked)
+                for video_id, last_checked in raw_not_livestreams.items()
+            }
+        else:
+            self.not_livestreams = {}
         self.livestreams: List[str] = []
 
         super().__init__(**kwargs)
@@ -146,16 +161,19 @@ class YoutubeStream(Stream):
         # channel's streams
         self.retry_count = 0
 
-        if self.not_livestreams:
-            self.not_livestreams = list(dict.fromkeys(self.not_livestreams))
-
         if self.livestreams:
             self.livestreams = list(dict.fromkeys(self.livestreams))
 
+        now = time.time()
         for video_id in get_video_ids_from_feed(rssdata):
-            if video_id in self.not_livestreams:
-                log.debug(f"video_id in not_livestreams: {video_id}")
+            if not video_id:
                 continue
+            if video_id in self.not_livestreams:
+                last_checked = self.not_livestreams[video_id]
+                if now - last_checked < self.NOT_LIVE_RECHECK_INTERVAL:
+                    log.debug(f"video_id in not_livestreams and still cooling down: {video_id}")
+                    continue
+                log.debug(f"video_id in not_livestreams but due for recheck: {video_id}")
             log.debug(f"video_id not in not_livestreams: {video_id}")
             params = {
                 "key": self._token["api_key"],
@@ -199,8 +217,9 @@ class YoutubeStream(Stream):
                             continue
                         if video_id not in self.livestreams:
                             self.livestreams.append(video_id)
+                        self.not_livestreams.pop(video_id, None)
                     else:
-                        self.not_livestreams.append(video_id)
+                        self.not_livestreams[video_id] = now
                         if video_id in self.livestreams:
                             self.livestreams.remove(video_id)
         log.debug(f"livestreams for {self.name}: {self.livestreams}")
@@ -265,11 +284,62 @@ class YoutubeStream(Stream):
         return embed, is_schedule
 
     async def fetch_id(self):
-        return await self._fetch_channel_resource("id")
+        return await self._fetch_channel_id()
 
     async def fetch_name(self):
         snippet = await self._fetch_channel_resource("snippet")
         return snippet["title"]
+
+    async def _fetch_channel_id(self):
+        if not self.name:
+            raise StreamNotFound()
+
+        name = self.name.strip()
+        api_key = self._token["api_key"]
+
+        # First try legacy username lookups for backward compatibility.
+        params = {"key": api_key, "part": "id", "forUsername": name}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(YOUTUBE_CHANNELS_ENDPOINT, params=params) as r:
+                data = await r.json()
+
+        self._check_api_errors(data)
+        items = data.get("items", [])
+        if items:
+            return items[0]["id"]
+
+        # Then try modern handle lookups if user supplied @handle.
+        if name.startswith("@"):
+            params = {"key": api_key, "part": "id", "forHandle": name}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(YOUTUBE_CHANNELS_ENDPOINT, params=params) as r:
+                    data = await r.json()
+
+            self._check_api_errors(data)
+            items = data.get("items", [])
+            if items:
+                return items[0]["id"]
+
+        # Fallback to search for channel title/handle text.
+        params = {
+            "key": api_key,
+            "part": "snippet",
+            "type": "channel",
+            "q": name.lstrip("@"),
+            "maxResults": 1,
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(YOUTUBE_SEARCH_ENDPOINT, params=params) as r:
+                data = await r.json()
+
+        self._check_api_errors(data)
+        items = data.get("items", [])
+        if items:
+            channel_id = items[0].get("id", {}).get("channelId")
+            if channel_id:
+                return channel_id
+
+        raise StreamNotFound()
 
     async def _fetch_channel_resource(self, resource: str):
         params = {"key": self._token["api_key"], "part": resource}
