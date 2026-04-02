@@ -56,7 +56,7 @@ def rnd(url):
 
 
 def get_video_ids_from_feed(feed):
-    root = ET.fromstring(feed)
+    root = ET.fromstring(feed.encode("utf-8").strip())
     rss_video_ids = []
     for child in root.iter("{http://www.w3.org/2005/Atom}entry"):
         for i in child.iter("{http://www.youtube.com/xml/schemas/2015}videoId"):
