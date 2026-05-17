@@ -166,7 +166,7 @@ class Streams(commands.Cog):
         ).format(
             link="https://kick.com/settings/developer",
             command=inline(
-                "[p]set api twitch client_id {} client_secret {}".format(
+                "[p]set api kick client_id {} client_secret {}".format(
                     _("<your_client_id_here>"), _("<your_client_secret_here>")
                 )
             ),
@@ -329,12 +329,6 @@ class Streams(commands.Cog):
         stream = PicartoStream(_bot=self.bot, name=channel_name)
         await self.check_online(ctx, stream)
 
-    @commands.command()
-    async def trovo(self, ctx: commands.Context, channel_name: str):
-        """Check if a Trovo channel is live."""
-        token = await self.bot.get_shared_api_tokens("trovo")
-        stream = TrovoStream(name=channel_name, token=token)
-
     @commands.guild_only()
     @commands.command()
     async def kickstream(self, ctx: commands.Context, channel_name: str):
@@ -347,7 +341,7 @@ class Streams(commands.Cog):
     async def check_online(
         self,
         ctx: commands.Context,
-        stream: Union[PicartoStream, YoutubeStream, TwitchStream, KickStream, TrovoStream],
+        stream: Union[PicartoStream, YoutubeStream, TwitchStream, KickStream],
     ):
         try:
             info = await stream.is_online()
@@ -366,12 +360,6 @@ class Streams(commands.Cog):
                 _(
                     "The YouTube API key is either invalid or has not been set. See {command}."
                 ).format(command=inline(f"{ctx.clean_prefix}streamset youtubekey"))
-            )
-        except InvalidTrovoCredentials:
-            await ctx.send(
-                _(
-                    "The Trovo API key is either invalid or has not been set. See {command}."
-                ).format(command=f"`{ctx.clean_prefix}streamset trovokey`")
             )
         except InvalidKickCredentials:
             await ctx.send(
@@ -483,13 +471,6 @@ class Streams(commands.Cog):
     ):
         """Toggle alerts in this channel for a Picarto stream."""
         await self.stream_alert(ctx, PicartoStream, channel_name, discord_channel)
-
-    @streamalert.command(name="trovo")
-    async def trovo_alert(
-        self, ctx: commands.Context, channel_name: str, discord_channel: discord.TextChannel = None
-    ):
-        """Toggle alerts in this channel for a Trovo stream."""
-        await self.stream_alert(ctx, TrovoStream, channel_name.lower(), discord_channel)
 
     @streamalert.command(name="kick")
     async def kick_alert(

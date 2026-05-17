@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from random import choice
 from string import ascii_letters
-from typing import ClassVar, Dict, List, Optional, Tuple
+from typing import ClassVar, List, Optional, Tuple
 
 import aiohttp
 import discord
@@ -23,7 +23,6 @@ from .errors import (
     InvalidYoutubeCredentials,
     OfflineStream,
     StreamNotFound,
-    InvalidTrovoCredentials,
     YoutubeQuotaExceeded,
 )
 
@@ -38,9 +37,6 @@ YOUTUBE_SEARCH_ENDPOINT = YOUTUBE_BASE_URL + "/search"
 YOUTUBE_VIDEOS_ENDPOINT = YOUTUBE_BASE_URL + "/videos"
 YOUTUBE_CHANNEL_RSS = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
-TROVO_BASE_URL = "https://open-api.trovo.live/openplatform"
-TROVO_GETUSERS_ENDPOINT = TROVO_BASE_URL + "/getusers"
-TROVO_CHANNELINFO_ENDPOINT = TROVO_BASE_URL + "/channels/id"
 KICK_BASE_URL = "https://api.kick.com/public/v1/"
 KICK_USERS_ENDPOINT = KICK_BASE_URL + "users"
 KICK_CHANNELS_ENDPOINT = KICK_BASE_URL + "channels"
@@ -56,7 +52,7 @@ def rnd(url):
 
 
 def get_video_ids_from_feed(feed):
-    root = ET.fromstring(feed.encode("utf-8").strip())
+    root = ET.fromstring(feed)
     rss_video_ids = []
     for child in root.iter("{http://www.w3.org/2005/Atom}entry"):
         for i in child.iter("{http://www.youtube.com/xml/schemas/2015}videoId"):
@@ -117,27 +113,12 @@ class Stream:
 class YoutubeStream(Stream):
     token_name = "youtube"
     platform_name = "YouTube"
-    # Re-check videos previously flagged as non-live after a short cooldown.
-    # This avoids false offline results when YouTube updates metadata late.
-    NOT_LIVE_RECHECK_INTERVAL = 300
 
     def __init__(self, **kwargs):
         self.id = kwargs.pop("id", None)
         self._token = kwargs.pop("token", None)
         self._config = kwargs.pop("config")
-        raw_not_livestreams = kwargs.pop("not_livestreams", {})
-        if isinstance(raw_not_livestreams, list):
-            # Backward compatibility with previously persisted list format.
-            self.not_livestreams: Dict[str, float] = {
-                video_id: 0.0 for video_id in raw_not_livestreams
-            }
-        elif isinstance(raw_not_livestreams, dict):
-            self.not_livestreams = {
-                str(video_id): float(last_checked)
-                for video_id, last_checked in raw_not_livestreams.items()
-            }
-        else:
-            self.not_livestreams = {}
+        self.not_livestreams: List[str] = []
         self.livestreams: List[str] = []
 
         super().__init__(**kwargs)
@@ -161,19 +142,16 @@ class YoutubeStream(Stream):
         # channel's streams
         self.retry_count = 0
 
+        if self.not_livestreams:
+            self.not_livestreams = list(dict.fromkeys(self.not_livestreams))
+
         if self.livestreams:
             self.livestreams = list(dict.fromkeys(self.livestreams))
 
-        now = time.time()
         for video_id in get_video_ids_from_feed(rssdata):
-            if not video_id:
-                continue
             if video_id in self.not_livestreams:
-                last_checked = self.not_livestreams[video_id]
-                if now - last_checked < self.NOT_LIVE_RECHECK_INTERVAL:
-                    log.debug(f"video_id in not_livestreams and still cooling down: {video_id}")
-                    continue
-                log.debug(f"video_id in not_livestreams but due for recheck: {video_id}")
+                log.debug(f"video_id in not_livestreams: {video_id}")
+                continue
             log.debug(f"video_id not in not_livestreams: {video_id}")
             params = {
                 "key": self._token["api_key"],
@@ -217,9 +195,8 @@ class YoutubeStream(Stream):
                             continue
                         if video_id not in self.livestreams:
                             self.livestreams.append(video_id)
-                        self.not_livestreams.pop(video_id, None)
                     else:
-                        self.not_livestreams[video_id] = now
+                        self.not_livestreams.append(video_id)
                         if video_id in self.livestreams:
                             self.livestreams.remove(video_id)
         log.debug(f"livestreams for {self.name}: {self.livestreams}")
@@ -284,62 +261,11 @@ class YoutubeStream(Stream):
         return embed, is_schedule
 
     async def fetch_id(self):
-        return await self._fetch_channel_id()
+        return await self._fetch_channel_resource("id")
 
     async def fetch_name(self):
         snippet = await self._fetch_channel_resource("snippet")
         return snippet["title"]
-
-    async def _fetch_channel_id(self):
-        if not self.name:
-            raise StreamNotFound()
-
-        name = self.name.strip()
-        api_key = self._token["api_key"]
-
-        # First try legacy username lookups for backward compatibility.
-        params = {"key": api_key, "part": "id", "forUsername": name}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(YOUTUBE_CHANNELS_ENDPOINT, params=params) as r:
-                data = await r.json()
-
-        self._check_api_errors(data)
-        items = data.get("items", [])
-        if items:
-            return items[0]["id"]
-
-        # Then try modern handle lookups if user supplied @handle.
-        if name.startswith("@"):
-            params = {"key": api_key, "part": "id", "forHandle": name}
-            async with aiohttp.ClientSession() as session:
-                async with session.get(YOUTUBE_CHANNELS_ENDPOINT, params=params) as r:
-                    data = await r.json()
-
-            self._check_api_errors(data)
-            items = data.get("items", [])
-            if items:
-                return items[0]["id"]
-
-        # Fallback to search for channel title/handle text.
-        params = {
-            "key": api_key,
-            "part": "snippet",
-            "type": "channel",
-            "q": name.lstrip("@"),
-            "maxResults": 1,
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(YOUTUBE_SEARCH_ENDPOINT, params=params) as r:
-                data = await r.json()
-
-        self._check_api_errors(data)
-        items = data.get("items", [])
-        if items:
-            channel_id = items[0].get("id", {}).get("channelId")
-            if channel_id:
-                return channel_id
-
-        raise StreamNotFound()
 
     async def _fetch_channel_resource(self, resource: str):
         params = {"key": self._token["api_key"], "part": resource}
@@ -588,63 +514,6 @@ class PicartoStream(Stream):
             data["adult"] = ""
 
         embed.set_footer(text=_("{adult}Category: {category} | Tags: {tags}").format(**data))
-        return embed
-
-
-class TrovoStream(Stream):
-    token_name = "trovo"
-
-    def __init__(self, **kwargs):
-        self.id = kwargs.pop("id", None)
-        self._client_id = kwargs.pop("token").get("client_id")
-        super().__init__(**kwargs)
-
-    async def is_online(self):
-        if not self._client_id:
-            raise InvalidTrovoCredentials()
-        async with aiohttp.ClientSession(headers={"Client-ID": str(self._client_id)}) as session:
-            if not self.id:
-                self.id = await self.fetch_id(session)
-            async with session.post(
-                TROVO_CHANNELINFO_ENDPOINT, json={"channel_id": self.id}
-            ) as response:
-                data = await response.json()
-        self._check_errors(response, data)
-        return self.make_embed(data)
-
-    async def fetch_id(self, session: aiohttp.ClientSession):
-        async with session.post(TROVO_GETUSERS_ENDPOINT, json={"users": [self.name]}) as response:
-            data = await response.json()
-        self._check_errors(response, data)
-        return data["users"][0]["channel_id"]
-
-    def _check_errors(self, response: aiohttp.ClientResponse, data: dict):
-        if response.status == 404:
-            raise StreamNotFound()
-        elif response.status == 400:
-            if data["message"] == "header err":
-                raise InvalidTrovoCredentials()
-            elif data["message"] == "check invalid param":
-                raise StreamNotFound()
-            else:
-                raise APIError(400, data)
-        elif response.status != 200:
-            raise APIError(response.status, data)
-
-    def make_embed(self, data: dict):
-        embed = discord.Embed(
-            title=data["live_title"] or _("Untitled broadcast"),
-            url=data["channel_url"],
-            color=0x19D66B,
-        )
-        embed.set_author(name=data["username"])
-        embed.add_field(name=_("Followers"), value=humanize_number(data["followers"]))
-        if profile_pic := data["profile_pic"]:
-            embed.set_thumbnail(url=rnd(profile_pic))
-        if thumbnail := data["thumbnail"]:
-            embed.set_image(url=rnd(thumbnail))
-        if category := data["category_name"]:
-            embed.set_footer(text=_("Playing: ") + category)
         return embed
 
 
