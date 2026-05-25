@@ -27,10 +27,6 @@ class InvalidYoutubeCredentials(StreamsError):
     pass
 
 
-class InvalidTrovoCredentials(StreamsError):
-    pass
-
-
 class InvalidKickCredentials(StreamsError):
     pass
 
