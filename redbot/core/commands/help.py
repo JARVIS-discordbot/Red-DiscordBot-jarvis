@@ -934,7 +934,7 @@ class RedHelpFormatter(HelpFormatterABC):
                 asyncio.create_task(_delete_delay_help(destination, messages, delete_delay))
 
 
-@commands.command(name="help", hidden=True, i18n=_)
+@commands.hybrid_command(name="help", hidden=True, i18n=_)
 async def red_help(ctx: Context, *, thing_to_get_help_for: str = None):
     """
     I need somebody
