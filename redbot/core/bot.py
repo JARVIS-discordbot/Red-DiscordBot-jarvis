@@ -249,6 +249,9 @@ class Red(
         kwargs["max_messages"] = message_cache_size
         self._max_messages = message_cache_size
 
+        if cli_flags.enable_debug_events:
+            kwargs["enable_debug_events"] = True
+
         # Allow overriding the shard count from the CLI. If not provided, discord.py's
         # auto-sharding behavior will be used.
         if getattr(cli_flags, "shard_count", None) is not None:
