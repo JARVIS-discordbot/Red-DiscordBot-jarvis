@@ -1030,7 +1030,7 @@ class RepoManager:
         return data_folder / "repos"
 
     def does_repo_exist(self, name: str) -> bool:
-        return name in self._repos
+        return name.lower() in self._repos
 
     @staticmethod
     def validate_and_normalize_repo_name(name: str) -> str:
@@ -1056,6 +1056,7 @@ class RepoManager:
             New Repo object representing the cloned repository.
 
         """
+        name = name.lower()  # convert the repo name to lower case
         if self.does_repo_exist(name):
             raise errors.ExistingGitRepo(
                 "That repo name you provided already exists. Please choose another."
@@ -1088,6 +1089,7 @@ class RepoManager:
             Repo object for the repository, if it exists.
 
         """
+        name = name.lower()
         return self._repos.get(name, None)
 
     @property
@@ -1132,6 +1134,7 @@ class RepoManager:
             If the repo does not exist.
 
         """
+        name = name.lower()
         repo = self.get_repo(name)
         if repo is None:
             raise errors.MissingGitRepo(f"There is no repo with the name {name}")
@@ -1158,6 +1161,7 @@ class RepoManager:
             A 2-`tuple` with Repo object and a 2-`tuple` of `str`
             containing old and new commit hashes.
         """
+        repo_name = repo_name.lower()
         repo = self._repos[repo_name]
         old, new = await repo.update()
         return (repo, (old, new))

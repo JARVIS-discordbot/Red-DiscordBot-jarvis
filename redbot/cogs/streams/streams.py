@@ -6,6 +6,7 @@ from redbot.core import commands, Config
 from redbot.core.i18n import cog_i18n, Translator, set_contextual_locales_from_guild
 from redbot.core.utils._internal_utils import send_to_owners_with_prefix_replaced
 from redbot.core.utils.chat_formatting import escape, inline, pagify
+from redbot.core import checks
 
 from .streamtypes import (
     KickStream,
@@ -45,7 +46,7 @@ log = logging.getLogger("red.core.cogs.Streams")
 class Streams(commands.Cog):
     """Various commands relating to streaming platforms.
 
-    You can check if a Twitch, YouTube or Picarto stream is
+    You can check if a Twitch, YouTube, or Picarto stream is
     currently live.
     """
 
@@ -418,7 +419,9 @@ class Streams(commands.Cog):
             discord.TextChannel, discord.VoiceChannel, discord.StageChannel
         ] = commands.CurrentChannel,
     ):
-        """Manage Twitch stream notifications."""
+        """Manage Twitch stream notifications.
+        Do not use the format 'discord_channel = name' only enter the channel name eg #twitch or the channel id.
+        """
         await ctx.invoke(self.twitch_alert_channel, channel_name, discord_channel)
 
     @_twitch.command(name="channel")
@@ -430,7 +433,12 @@ class Streams(commands.Cog):
             discord.TextChannel, discord.VoiceChannel, discord.StageChannel
         ] = commands.CurrentChannel,
     ):
-        """Toggle alerts in this or the given channel for a Twitch stream."""
+        """
+        Toggle alerts for a Twitch stream in this or the specified Discord channel.
+
+        Note: Provide the Twitch channel name or ID directly.
+        Do not use the format 'discord_channel = name'only enter the channel name eg #twitch or the channel id.
+        """
         if re.fullmatch(r"<#\d+>", channel_name):
             await ctx.send(
                 _("Please supply the name of a *Twitch* channel, not a Discord channel.")
@@ -616,6 +624,7 @@ class Streams(commands.Cog):
         await self.add_or_remove(ctx, stream, discord_channel)
 
     @commands.group()
+    @commands.guild_only()
     @commands.mod_or_permissions(manage_channels=True)
     async def streamset(self, ctx: commands.Context):
         """Manage stream alert settings."""

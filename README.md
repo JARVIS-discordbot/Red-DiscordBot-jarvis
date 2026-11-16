@@ -57,6 +57,11 @@
   <a href="#license">License</a>
 </p>
 
+
+# This is for my bot J.A.R.V.I.S 
+
+# for the official bot code go to https://github.com/Cog-Creators/Red-DiscordBot
+ 
 # Overview
 
 Red is a fully modular bot – meaning all features and commands can be enabled/disabled to your

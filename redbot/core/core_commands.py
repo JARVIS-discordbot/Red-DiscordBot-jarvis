@@ -46,7 +46,6 @@ from . import (
     version_info as red_version_info,
     commands,
     errors,
-    _i18n,
     i18n,
     bank,
     modlog,
@@ -442,8 +441,17 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
                 "Red is backed by a passionate community who contributes and "
                 "creates content for everyone to enjoy. [Join us today]({}) "
                 "and help us improve!\n\n"
-                "(c) Cog Creators"
-            ).format(red_repo, author_repo, contributors_url, support_server_url)
+                "(c) Cog Creators \n\n modified by bencos18 \n\n"  # add me in info page
+                "{} "
+                "{} "  # add extra spaces for custom stuff
+            ).format(
+                red_repo,
+                author_repo,
+                contributors_url,
+                support_server_url,
+                "[donate](https://buymeacoffee.com/bencos18)",
+                "  [bot support](https://discord.gg/WW4eNQj9qr)",
+            )
 
             embed = discord.Embed(color=(await ctx.embed_colour()))
             embed.add_field(
@@ -3370,13 +3378,13 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
     # -- Bot Roles Commands -- ###
 
     @_set.group(name="roles")
-    @commands.guildowner()
+    @commands.admin_or_permissions(administrator=True)
     @commands.guild_only()
     async def _set_roles(self, ctx: commands.Context):
         """Set server's admin and mod roles for [botname]."""
 
     @_set_roles.command(name="addadminrole")
-    @commands.guildowner()
+    @commands.admin_or_permissions(administrator=True)
     @commands.guild_only()
     async def _set_roles_addadminrole(self, ctx: commands.Context, *, role: discord.Role):
         """
@@ -3526,10 +3534,17 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         - `<language_code>` - The default locale to use for the bot. This can be any language code with country code included.
         """
         try:
-            standardized_locale_name = _i18n.set_global_locale(language_code)
-        except ValueError:
+            locale = BabelLocale.parse(language_code, sep="-")
+        except (ValueError, UnknownLocaleError):
             await ctx.send(_("Invalid language code. Use format: `en-US`"))
             return
+        if locale.territory is None:
+            await ctx.send(
+                _("Invalid format - language code has to include country code, e.g. `en-US`")
+            )
+            return
+        standardized_locale_name = f"{locale.language}-{locale.territory}"
+        i18n.set_locale(standardized_locale_name)
         await self.bot._i18n_cache.set_locale(None, standardized_locale_name)
         await i18n.set_contextual_locales_from_guild(self.bot, ctx.guild)
         await ctx.send(_("Global locale has been set."))
@@ -3562,10 +3577,17 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
             await ctx.send(_("Locale has been set to the default."))
             return
         try:
-            standardized_locale_name = i18n.set_contextual_locale(language_code)
-        except ValueError:
+            locale = BabelLocale.parse(language_code, sep="-")
+        except (ValueError, UnknownLocaleError):
             await ctx.send(_("Invalid language code. Use format: `en-US`"))
             return
+        if locale.territory is None:
+            await ctx.send(
+                _("Invalid format - language code has to include country code, e.g. `en-US`")
+            )
+            return
+        standardized_locale_name = f"{locale.language}-{locale.territory}"
+        i18n.set_contextual_locale(standardized_locale_name)
         await self.bot._i18n_cache.set_locale(ctx.guild, standardized_locale_name)
         await ctx.send(_("Locale has been set."))
 
@@ -3611,16 +3633,23 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         - `[language_code]` - The default region format to use for the bot.
         """
         if language_code.lower() == "reset":
-            _i18n.set_global_regional_format(None)
+            i18n.set_regional_format(None)
             await self.bot._i18n_cache.set_regional_format(None, None)
             await ctx.send(_("Global regional formatting will now be based on bot's locale."))
             return
 
         try:
-            standardized_locale_name = _i18n.set_global_regional_format(language_code)
-        except ValueError:
+            locale = BabelLocale.parse(language_code, sep="-")
+        except (ValueError, UnknownLocaleError):
             await ctx.send(_("Invalid language code. Use format: `en-US`"))
             return
+        if locale.territory is None:
+            await ctx.send(
+                _("Invalid format - language code has to include country code, e.g. `en-US`")
+            )
+            return
+        standardized_locale_name = f"{locale.language}-{locale.territory}"
+        i18n.set_regional_format(standardized_locale_name)
         await self.bot._i18n_cache.set_regional_format(None, standardized_locale_name)
         await ctx.send(
             _("Global regional formatting will now be based on `{language_code}` locale.").format(
@@ -3655,10 +3684,17 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
             return
 
         try:
-            standardized_locale_name = i18n.set_contextual_regional_format(language_code)
-        except ValueError:
+            locale = BabelLocale.parse(language_code, sep="-")
+        except (ValueError, UnknownLocaleError):
             await ctx.send(_("Invalid language code. Use format: `en-US`"))
             return
+        if locale.territory is None:
+            await ctx.send(
+                _("Invalid format - language code has to include country code, e.g. `en-US`")
+            )
+            return
+        standardized_locale_name = f"{locale.language}-{locale.territory}"
+        i18n.set_contextual_regional_format(standardized_locale_name)
         await self.bot._i18n_cache.set_regional_format(ctx.guild, standardized_locale_name)
         await ctx.send(
             _("Regional formatting will now be based on `{language_code}` locale.").format(
@@ -5999,3 +6035,80 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
         )
         await ctx.send(message)
         # We need a link which contains a thank you to other projects which we use at some point.
+
+    @commands.command()
+    async def credits(self, ctx):
+        """Credits for everyone that have helped to make this bot possible."""
+        repo_cog = self.bot.get_cog("Downloader")
+        if not repo_cog:
+            return await ctx.send("My owner needs to load another plugin before I can continue.")
+
+        # Create base embed
+        embed = discord.Embed(
+            title=f"{self.bot.user.name}'s Code Credits",
+            timestamp=self.bot.user.created_at,
+        )
+        embed.set_footer(text=f"{self.bot.user.name}'s birthday is")
+        embed.set_thumbnail(url=ctx.me.avatar.url)
+        embed.add_field(
+            name="\N{ZERO WIDTH SPACE}",
+            value=f"{self.bot.user.name} is an instance of [Red Bot](https://github.com/Cog-Creators/Red-DiscordBot), "
+            "created by [Twentysix](https://github.com/Twentysix26) and improved by [many]"
+            "(https://github.com/Cog-Creators/Red-DiscordBot/graphs/contributors).",
+            inline=False,
+        )
+
+        # Get third-party modules
+        used_repos = {c.repo_name for c in await repo_cog.installed_cogs()}
+        cogs_credits = [
+            f"[{repo.url.split('/')[4]}]({repo.url}): {', '.join(repo.author) or repo.url.split('/')[-2]}"
+            for repo in repo_cog._repo_manager.repos
+            if repo.url.startswith("http") and repo.name in used_repos
+        ]
+
+        cogs_credits = list(set(cogs_credits))
+        cogs_credits = sorted(cogs_credits, key=lambda x: x[1].lower())
+        cogs_credits_text = "\n".join(cogs_credits)
+
+        # Check if we can fit everything in one embed
+        if (
+            len(cogs_credits_text) <= 1000
+        ):  # Leave room for embed overhead and stay under 1024 field limit
+            embed.add_field(
+                name="Third-party modules and their creators",
+                value=cogs_credits_text,
+                inline=False,
+            )
+            await ctx.send(embed=embed)
+        else:
+            # Use pagination for large lists - Discord field value limit is 1024
+            pages = list(pagify(cogs_credits_text, page_length=1000))
+            embeds = []
+
+            for i, page in enumerate(pages):
+                page_embed = discord.Embed(
+                    title=f"{self.bot.user.name}'s Code Credits (Page {i+1}/{len(pages)})",
+                    timestamp=self.bot.user.created_at,
+                )
+                page_embed.set_footer(text=f"{self.bot.user.name}'s birthday is")
+                page_embed.set_thumbnail(url=ctx.me.avatar.url)
+
+                if i == 0:
+                    # First page includes the main description
+                    page_embed.add_field(
+                        name="\N{ZERO WIDTH SPACE}",
+                        value=f"{self.bot.user.name} is an instance of [Red Bot](https://github.com/Cog-Creators/Red-DiscordBot), "
+                        "created by [Twentysix](https://github.com/Twentysix26) and improved by [many]"
+                        "(https://github.com/Cog-Creators/Red-DiscordBot/graphs/contributors).",
+                        inline=False,
+                    )
+
+                page_embed.add_field(
+                    name="Third-party modules and their creators",
+                    value=page,
+                    inline=False,
+                )
+                embeds.append(page_embed)
+
+            # Use menu system for pagination
+            await menu(ctx, embeds, timeout=180)

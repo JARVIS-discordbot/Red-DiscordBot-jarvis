@@ -239,6 +239,51 @@ class Red(
         self.rpc_enabled = cli_flags.rpc
         self.rpc_port = cli_flags.rpc_port
         self._last_exception = None
+        self._config.register_global(
+            token=None,
+            prefix=[],
+            packages=[],
+            owner=None,
+            whitelist=[],
+            blacklist=[],
+            locale="en-US",
+            regional_format=None,
+            embeds=True,
+            color=15158332,
+            fuzzy=False,
+            custom_info=None,
+            help__page_char_limit=1000,
+            help__max_pages_in_guild=2,
+            help__delete_delay=0,
+            help__use_menus=0,
+            help__show_hidden=False,
+            help__show_aliases=True,
+            help__verify_checks=True,
+            help__verify_exists=False,
+            help__tagline="",
+            help__use_tick=False,
+            help__react_timeout=30,
+            description=_DEFAULT_DESCRIPTION,
+            invite_public=False,
+            invite_perm=0,
+            invite_commands_scope=False,
+            disabled_commands=[],
+            disabled_command_msg="That command is disabled.",
+            invoke_error_msg=None,
+            extra_owner_destinations=[],
+            owner_opt_out_list=[],
+            last_system_info__python_prefix=None,
+            last_system_info__python_version=[3, 7],
+            last_system_info__machine=None,
+            last_system_info__system=None,
+            schema_version=0,
+            datarequests__allow_user_requests=True,
+            datarequests__user_requests_are_strict=True,
+            use_buttons=False,
+            enabled_slash_commands={},
+            enabled_user_commands={},
+            enabled_message_commands={},
+        )
 
         # TODO: add cache for embed settings
         self._prefix_cache = PrefixManager(self._config, cli_flags)
@@ -284,6 +329,11 @@ class Red(
 
         if cli_flags.enable_debug_events:
             kwargs["enable_debug_events"] = True
+
+        # Allow overriding the shard count from the CLI. If not provided, discord.py's
+        # auto-sharding behavior will be used.
+        if getattr(cli_flags, "shard_count", None) is not None:
+            kwargs["shard_count"] = cli_flags.shard_count
 
         self._uptime = None
         self._checked_time_accuracy = None
@@ -1217,28 +1267,9 @@ class Red(
             self.owner_ids.add(self._owner_id_overwrite)
 
         i18n_locale = await self._config.locale()
-        try:
-            _i18n.set_global_locale(i18n_locale)
-        except (ValueError, TypeError):
-            log.warning(
-                "The bot's global locale was set to an invalid value (%r)"
-                " and will be reset to default (%s).",
-                i18n_locale,
-                _i18n.FRESH_INSTALL_LOCALE,
-            )
-            i18n_locale = _i18n.FRESH_INSTALL_LOCALE
-            await self._config.locale.clear()
+        i18n.set_locale(i18n_locale)
         i18n_regional_format = await self._config.regional_format()
-        try:
-            _i18n.set_global_regional_format(i18n_regional_format)
-        except (ValueError, TypeError):
-            log.warning(
-                "The bot's global regional format was set to an invalid value (%r)"
-                " and will be reset to default (which is to inherit global locale, i.e. %s).",
-                i18n_regional_format,
-                i18n_locale,
-            )
-            await self._config.regional_format.clear()
+        i18n.set_regional_format(i18n_regional_format)
 
     async def _pre_connect(self) -> None:
         """
